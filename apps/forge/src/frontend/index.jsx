@@ -525,6 +525,7 @@ const Overview = ({ onDrill, onSettings }) => {
   const [error, setError] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState(null);
+  const [dismissedError, setDismissedError] = useState(null); // last_scan_error.at that was dismissed
   const [spaces, setSpaces] = useState([]);
   const [space, setSpace] = useState(null); // { label, value } or null = all spaces
 
@@ -612,12 +613,15 @@ const Overview = ({ onDrill, onSettings }) => {
           <Text>{scanMessage}</Text>
         </SectionMessage>
       )}
-      {stats.last_scan_error && (
+      {stats.last_scan_error && dismissedError !== stats.last_scan_error.at && (
         <SectionMessage appearance="error" title="Last scan failed">
           <Text>{stats.last_scan_error.message}</Text>
           <Text>
             {`Failed at ${new Date(stats.last_scan_error.at).toLocaleString()}. Check your AI provider account (billing/quota) or update the key in Settings, then run the scan again.`}
           </Text>
+          <Button appearance="subtle" onClick={() => setDismissedError(stats.last_scan_error.at)}>
+            Dismiss
+          </Button>
         </SectionMessage>
       )}
 

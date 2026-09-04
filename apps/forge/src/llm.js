@@ -10,7 +10,20 @@ import { fetch } from '@forge/api';
 import { kvs } from '@forge/kvs';
 
 const SETTINGS_KEY = 'llm-settings'; // {provider, model, embeddingModel}
-const SECRET_KEY = 'llm-api-key';
+const SECRET_KEY = 'llm-api-key'; // legacy single-key slot (pre per-provider)
+
+const secretKeyFor = (provider) => `llm-api-key-${provider}`;
+
+/** Stored key for a provider; falls back to the legacy shared slot only when
+ * that provider is the currently-selected one (so an old OpenAI key is never
+ * sent to Google, etc.). */
+async function getProviderKey(provider) {
+  const key = await kvs.getSecret(secretKeyFor(provider));
+  if (key) return key;
+  const settings = await kvs.get(SETTINGS_KEY);
+  if (settings?.provider === provider) return kvs.getSecret(SECRET_KEY);
+  return null;
+}
 
 // `models`/`embeddingModels` here are a static FALLBACK catalog, used only
 // until an API key is available — listModels() fetches the live list from
@@ -56,7 +69,7 @@ export const PROVIDERS = {
 
 export async function getLlmSettings() {
   const settings = (await kvs.get(SETTINGS_KEY)) ?? null;
-  const hasKey = Boolean(await kvs.getSecret(SECRET_KEY));
+  const hasKey = Boolean(settings?.provider && (await getProviderKey(settings.provider)));
   return { settings, hasKey };
 }
 
@@ -68,12 +81,12 @@ export async function saveLlmSettings({ provider, model, embeddingModel, apiKey 
     model: model || p.defaultModel,
     embeddingModel: embeddingModel || p.defaultEmbeddingModel,
   });
-  if (apiKey) await kvs.setSecret(SECRET_KEY, apiKey);
+  if (apiKey) await kvs.setSecret(secretKeyFor(provider), apiKey);
 }
 
 async function requireConfig() {
   const settings = await kvs.get(SETTINGS_KEY);
-  const apiKey = await kvs.getSecret(SECRET_KEY);
+  const apiKey = settings ? await getProviderKey(settings.provider) : null;
   if (!settings || !apiKey) {
     throw new Error('LLM not configured. Set a provider and API key in Docgrity settings.');
   }
@@ -91,7 +104,7 @@ async function requireConfig() {
 export async function listModels(provider, apiKey = null) {
   const p = PROVIDERS[provider];
   if (!p) throw new Error(`Unknown provider: ${provider}`);
-  const key = apiKey || (await kvs.getSecret(SECRET_KEY));
+  const key = apiKey || (await getProviderKey(provider));
   const fallback = { models: p.models, embeddingModels: p.embeddingModels, live: false };
   if (!key) return fallback;
   try {
@@ -108,7 +121,12 @@ export async function listModels(provider, apiKey = null) {
       }));
       return {
         models: all
-          .filter((m) => m.methods.includes('generateContent') && m.id.startsWith('gemini-'))
+          .filter(
+            (m) =>
+              m.methods.includes('generateContent') &&
+              m.id.startsWith('gemini-') &&
+              !/image|tts|transcribe|audio|live|robotics/.test(m.id),
+          )
           .map((m) => m.id)
           .sort()
           .reverse(),
