@@ -1,0 +1,25 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+dist/
+
+# Node / Forge
+node_modules/
+apps/forge/.forge/
+
+# OS / editor
+.DS_Store
+.idea/
+
+# Local data
+*.local.json

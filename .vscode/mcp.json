@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "docgrity": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "python", "-m", "docgrity.mcp.docgrity.server"],
+      "env": {
+        "DOCGRITY_API_URL": "http://localhost:8000",
+        "DOCGRITY_API_KEY": "${input:docgrity-api-key}",
+        "DOCGRITY_TENANT_ID": "${input:docgrity-tenant-id}"
+      }
+    }
+  },
+  "inputs": [
+    {
+      "id": "docgrity-api-key",
+      "type": "promptString",
+      "description": "Docgrity API key (dev: API_SECRET_KEY)",
+      "password": true
+    },
+    {
+      "id": "docgrity-tenant-id",
+      "type": "promptString",
+      "description": "Docgrity tenant UUID"
+    }
+  ]
+}

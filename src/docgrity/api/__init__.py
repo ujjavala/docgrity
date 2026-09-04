@@ -1,0 +1,1 @@
+"""Docgrity FastAPI application."""

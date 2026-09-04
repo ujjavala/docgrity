@@ -1,0 +1,41 @@
+modules:
+  confluence:globalPage:
+    - key: docgrity-dashboard
+      resource: main
+      render: native
+      title: Docgrity
+      route: docgrity
+      resolver:
+        endpoint: docgrity-api
+  endpoint:
+    - key: docgrity-api
+      remote: docgrity-backend
+      auth:
+        appSystemToken:
+          enabled: true
+  # Thin app: UI + Forge Remote calls only. No analysis logic in the Forge runtime.
+remotes:
+  - key: docgrity-backend
+    baseUrl: https://revised-commons-democracy-reprints.trycloudflare.com # dev tunnel
+    operations:
+      - fetch
+    auth:
+      appSystemToken:
+        enabled: true
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+permissions:
+  scopes:
+    - read:app-system-token
+    - read:confluence-content.summary
+    - read:comment:confluence
+    - write:comment:confluence
+  external:
+    fetch:
+      backend:
+        - remote: docgrity-backend
+app:
+  runtime:
+    name: nodejs22.x
+  id: ari:cloud:ecosystem::app/05f6275a-e8b5-4828-b2cc-bd0570d77a0a

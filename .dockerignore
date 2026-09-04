@@ -1,0 +1,23 @@
+# Never ship secrets or local state into the image build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Not needed in the image — keeps builds fast and lean.
+.git
+.venv
+.vscode
+.github
+node_modules
+apps/forge/node_modules
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+tests
+evaluations
+docs
+infrastructure
+scripts

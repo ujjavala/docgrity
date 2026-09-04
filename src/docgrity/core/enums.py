@@ -1,0 +1,90 @@
+"""Domain enums shared across models, schemas, and agents."""
+
+from enum import StrEnum
+
+
+class SourceType(StrEnum):
+    CONFLUENCE = "CONFLUENCE"
+    SLACK = "SLACK"
+    GITHUB = "GITHUB"
+
+
+class KnowledgeItemType(StrEnum):
+    CONFLUENCE_PAGE = "CONFLUENCE_PAGE"
+    SLACK_MESSAGE = "SLACK_MESSAGE"
+    SLACK_THREAD = "SLACK_THREAD"
+    GITHUB_FILE = "GITHUB_FILE"
+    GITHUB_PR = "GITHUB_PR"
+    README = "README"
+    ADR = "ADR"
+    CODE = "CODE"
+
+
+class FindingType(StrEnum):
+    DUPLICATE = "DUPLICATE"
+    CONTRADICTION = "CONTRADICTION"
+    OPEN_QUESTION = "OPEN_QUESTION"
+    UNDOCUMENTED_DECISION = "UNDOCUMENTED_DECISION"
+    STALE = "STALE"
+    CODE_DOC_DRIFT = "CODE_DOC_DRIFT"
+    MISSING_OWNER = "MISSING_OWNER"
+    TERMINOLOGY_DRIFT = "TERMINOLOGY_DRIFT"
+
+
+class FindingStatus(StrEnum):
+    NEW = "NEW"
+    INVESTIGATING = "INVESTIGATING"
+    AWAITING_OWNER = "AWAITING_OWNER"
+    AWAITING_DECISION = "AWAITING_DECISION"
+    ACTION_REQUIRED = "ACTION_REQUIRED"
+    RESOLVED = "RESOLVED"
+    DISMISSED = "DISMISSED"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+
+
+class FindingSeverity(StrEnum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class DuplicateAction(StrEnum):
+    KEEP_A = "KEEP_A"
+    KEEP_B = "KEEP_B"
+    MERGE = "MERGE"
+    ARCHIVE_A = "ARCHIVE_A"
+    ARCHIVE_B = "ARCHIVE_B"
+    REVIEW = "REVIEW"
+    UNKNOWN = "UNKNOWN"
+
+
+class ActionType(StrEnum):
+    ADD_CONFLUENCE_COMMENT = "ADD_CONFLUENCE_COMMENT"
+    POST_SLACK_MESSAGE = "POST_SLACK_MESSAGE"
+    CREATE_JIRA_ISSUE = "CREATE_JIRA_ISSUE"
+    CREATE_GITHUB_ISSUE = "CREATE_GITHUB_ISSUE"
+    CREATE_PR = "CREATE_PR"
+    UPDATE_CONFLUENCE = "UPDATE_CONFLUENCE"
+    ARCHIVE_CONFLUENCE_PAGE = "ARCHIVE_CONFLUENCE_PAGE"
+
+
+class ScanStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class AgentTaskStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class LLMCapability(StrEnum):
+    REASONING_HIGH = "reasoning.high"
+    REASONING_FAST = "reasoning.fast"
+    CLASSIFICATION = "classification"
+    EMBEDDING = "embedding"

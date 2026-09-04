@@ -1,0 +1,25 @@
+[project]
+name = "docgrity-mcp"
+version = "0.1.0"
+description = "MCP server for Docgrity — query knowledge-integrity findings and trigger scans from any MCP-capable agent (VS Code, Claude, Cursor, ...)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+keywords = ["mcp", "docgrity", "knowledge", "documentation", "confluence", "agents"]
+dependencies = [
+    "mcp>=1.2",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+docgrity-mcp = "docgrity_mcp.server:main"
+
+[project.urls]
+Homepage = "https://docgrity.com"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docgrity_mcp"]
