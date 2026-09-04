@@ -2,31 +2,46 @@
 
 ## DEV.to / dev++ launch post
 
-**Title:** I built an AI agent that finds where your Confluence wiki contradicts itself — free, zero infrastructure
+**Title:** In the age of AI docslop, your wiki disagrees with itself more than ever — so I built an agent that catches it
 
-**Tags:** ai, atlassian, productivity, showdev
+**Tags:** ai, atlassian, documentation, showdev
 
 ---
 
-Every team's wiki eventually starts disagreeing with itself. The onboarding page says
-deploys go through Jenkins; the runbook says GitHub Actions. Two near-identical pages
-describe the same process differently. Open questions from six months ago sit
-unanswered in the middle of "authoritative" docs.
+We're generating documentation faster than we've ever been able to read it.
 
-Nobody notices until it bites someone.
+AI writes our design docs, our runbooks, our onboarding guides, our meeting summaries.
+Every sprint adds pages; almost nothing retires them. The result isn't a knowledge
+base — it's **docslop**: an ever-growing pile of plausible-sounding pages where the
+onboarding doc says deploys go through Jenkins, the runbook says GitHub Actions, two
+near-identical pages describe the same process differently, and "TBD — confirm with the
+team" has been sitting there for a year.
 
-**Docgrity** is a Confluence app that scans your spaces and finds three things:
+The cognitive load lands on humans: nobody can hold the whole wiki in their head anymore,
+so nobody notices the contradictions until one bites someone at 2am.
+
+And it's about to get worse in an interesting way. **Your docs are no longer just for
+humans.** Agentic workflows, spec-driven development, RAG pipelines, AI harnesses — they
+all treat your documentation as ground truth. When your wiki contradicts itself, you're
+not just confusing the new hire; you're feeding conflicting context straight into every
+AI agent that reads it. Garbage in, confidently-wrong agent out. If AI is going to build
+from your specs, your specs need to actually agree with each other.
+
+So I built **Docgrity** — an agent whose only job is to find where your Confluence wiki
+disagrees with itself:
 
 - **Contradictions** — pages that make conflicting claims about the same topic, with the
   exact conflicting excerpts quoted as evidence
 - **Duplicates** — semantically overlapping pages that should be merged, found via
   embeddings, confirmed by an LLM
-- **Open questions** — unresolved "TBD", "TODO", "who owns this?" markers buried in docs
+- **Open questions** — unresolved "TBD", "TODO", "who owns this?" markers buried in
+  supposedly authoritative docs
 
 For each finding it identifies a *potential* owner (last meaningful author, labelled as
 potential — never asserted) and, with one click and your approval, posts a polite
 Confluence comment asking them to reconcile it. Nothing is ever changed or posted
-without human approval.
+without human approval. It's AI used to *reduce* doc entropy, not add to it — the agent
+never writes a page, it only asks humans to fix the ones that disagree.
 
 ### The interesting constraint: zero infrastructure
 
