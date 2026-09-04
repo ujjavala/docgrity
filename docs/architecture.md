@@ -2,108 +2,82 @@
 
 ## Overview
 
-Docgrity is a monorepo with a Python backend (FastAPI + async worker), a shared knowledge model
-in PostgreSQL (+ pgvector), MCP servers as the interface to external systems, specialised agents
-for semantic reasoning, and a Confluence Forge app as the first user surface.
+Docgrity runs entirely on **Atlassian Forge** — no servers, databases, queues or remotes we
+operate. The app lives in `apps/forge`: Forge SQL for the knowledge model, `@forge/events`
+queues for async scans, KVS for settings/secrets, UI Kit for the dashboard, and a Rovo agent
+as the conversational surface. The only external calls are to the tenant's chosen LLM
+provider. Implementation detail lives in [forge-native.md](forge-native.md).
 
 ```
-                Atlassian Cloud
+                Atlassian Cloud (Forge runtime)
                       |
-              Forge app (apps/forge)
-        byline panel · global page · lifecycle
-                      |
-            Forge Remote (FIT-signed)
-                      |
-               FastAPI API (apps/api)
-                      |
-         +------------+------------+
-         |                         |
-   arq worker (scans)        Policy layer
-         |                         |
-     Agents (agents/)  --MCP-->  mcp/confluence --> Confluence REST v2
-         |
-   +-----+------+--------+
-   |            |        |
-PostgreSQL    Redis     S3 (later)
-+ pgvector
+        +-------------+---------------------------+
+        |             |               |           |
+  Global page    Resolvers      Rovo agent   Scheduled trigger
+  (UI Kit)      (index.js)      (rovo.js)    (migrations, hourly)
+        \             |               |           |
+         +------------+------+-------+-----------+
+                             |
+              @forge/events queues: scans · notify
+                             |
+              Consumers: scans.js · notify.js
+                     |               |
+              agents.js (LLM)   confluence.js (asApp REST v2)
+                     |
+               llm.js  ── egress allowlist ──► Gemini / OpenAI / Anthropic
+                     |
+        Forge SQL (knowledge model) · KVS (settings, secret key)
 ```
 
 ## Key decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Backend language | Python 3.13, uv | AI ecosystem, MCP SDK, Pydantic, FastAPI |
-| API | FastAPI | async, typed, OpenAPI |
-| Agent engine | PydanticAI behind our own `Agent` abstraction | avoid framework lock-in |
-| LLM providers | OpenAI **and** Anthropic behind `LLMProvider` + capability router | no single-vendor dependency |
-| Embeddings | Configurable provider; pgvector storage | avoid separate vector DB initially |
-| Database | PostgreSQL + pgvector | one store for relational + vector |
-| Orchestration | arq (Redis) worker for MVP 1; Temporal deferred | avoid infra before scale justifies it |
-| Cache/queue | Redis | short-lived cache, locks, job queue |
-| Confluence surface | Forge app + Forge Remote to external backend | Marketplace distribution; AI platform stays outside the Forge runtime |
-| External-system access | MCP servers only | uniform tool contract, permissioning, auditability |
+| Platform | 100% Forge-native | zero infrastructure cost, Marketplace "Runs on Atlassian" |
+| Language | Node 22 JavaScript | Forge runtime; no build step |
+| Database | Forge SQL (MySQL engine) | relational store inside the tenant boundary |
+| Embeddings | JSON text columns + cosine in JS | Forge SQL has no vector type; scale doesn't justify more |
+| Async work | `@forge/events` queues + consumers | scans exceed resolver limits; 900 s consumer timeout |
+| LLM providers | BYO key: Gemini / OpenAI / Anthropic via `llm.js` | tenant choice, no vendor lock-in, no cost to us |
+| Secrets | `kvs.setSecret` only | never in SQL rows, logs, responses, UI |
+| Conversational surface | Rovo agent + actions | free (Atlassian LLM), native chat UX |
+| Tenancy | Forge installation boundary | no `tenant_id`; data isolation by platform |
 
 ## Layering rules
 
-1. **External systems are accessed through MCP.** Agents never call Confluence/Slack/GitHub
-   APIs directly.
-2. **Agents** do semantic reasoning only; they communicate via structured task messages.
-3. **Deterministic code** owns auth, permissions, DB writes, dedup, hashing, thresholds,
-   policies, workflow state, rate limiting, audit logging.
-4. **Findings are the common language** between agents; every finding carries evidence.
-5. Source connectors, agents, domain logic, and API layers stay separate.
-
-## Repository structure
-
-Python code lives under `src/docgrity/` (a top-level `mcp/` package would shadow the MCP SDK
-import); non-Python assets stay top-level.
-
-```
-docgrity/
-├── apps/
-│   └── forge/            Atlassian Forge app (Confluence surface)
-├── src/docgrity/
-│   ├── api/              FastAPI application
-│   ├── agents/           duplicate, ownership, action, verification (MVP 1)
-│   ├── mcp/confluence/   Confluence MCP server + REST client
-│   ├── core/             models, schemas, llm, policies, security, config
-│   └── workflows/        scan + ingestion pipelines (arq tasks)
-├── prompts/              versioned prompt files
-├── evaluations/          curated eval datasets + harness
-├── migrations/           Alembic
-├── infrastructure/       deployment
-├── docs/
-└── tests/
-```
+1. **Confluence is accessed only through `confluence.js`** (`api.asApp()`); LLM providers
+   only through `llm.js`. Agents never call external APIs directly.
+2. **Agents (`agents.js`)** do semantic reasoning only, with versioned prompts and typed
+   JSON outputs validated in code.
+3. **Deterministic code** owns permissions, DB writes, dedup, hashing, thresholds,
+   policies, workflow state, and audit logging.
+4. **Findings are the common language**; every finding carries evidence and records
+   model + prompt_version.
+5. Rovo/LLM-generated inputs are untrusted: IDs validated against the DB, identity taken
+   from the Forge context.
 
 ## Scan lifecycle
 
 ```
-CREATE SCAN → validate permissions → discover sources → collect KnowledgeItems
-→ dedupe ingestion (external_id + content_hash) → generate embeddings
-→ build candidate relationships → run analysis agents → collect findings
-→ ownership analysis → resolution recommendation → policy evaluation
-→ execute allowed actions → persist findings → report
+CREATE SCAN (resolver or Rovo action) → scan rows PENDING → queue push per check
+→ consumer: ingest pages (external_id + version dedupe) → embed missing items
+→ candidate pairs (cosine ≥ threshold, or capped all-pairs when no embeddings)
+→ LLM assess (duplicate / contradiction / open questions) → confidence gate
+→ persist finding + evidence + potential owners → policy-gated comment → audit
 ```
 
-Incremental scanning: track `content_hash`, `updated_at`, `last_scanned_at`; skip expensive
-analysis for unchanged items; re-analyse affected relationships on change.
+Incremental scanning: unchanged page versions are skipped; already-reported pairs are
+deduped against open findings.
 
 ## Agentic vs deterministic
 
-- **Agentic (LLM):** semantic similarity verification, claim extraction, contradiction
-  reasoning, question interpretation, decision detection, entity resolution, ownership
-  reasoning, recommended actions, natural-language explanation.
-- **Deterministic:** authentication, permissions, DB writes, external-ID dedup, hashing,
-  timestamps, confidence thresholds, action policies, workflow state, rate limiting, audit.
+- **Agentic (LLM):** duplicate verification, contradiction reasoning, open-question
+  detection, comment drafting, contradiction patch drafting.
+- **Deterministic:** admin checks, DB writes, dedup, cosine candidate selection,
+  confidence thresholds, action policies, exact-match patch application, audit.
 
-## Observability
+## Deployment
 
-OpenTelemetry across API, worker, agents. Track: scan_id, task_id, agent, model, tool calls,
-MCP calls, latency, tokens, cost, finding, confidence.
-
-## Deployment (beta)
-
-Single containerised backend (api + worker) on a public HTTPS host, managed Postgres with
-pgvector, Redis. Forge app deployed via Forge CLI to Atlassian's cloud. Secrets in a secrets
-manager (never DB rows); `.env` for local dev only.
+`forge deploy` to Atlassian's cloud; no other hosting. Egress allowlisted in
+`manifest.yml` to the three LLM provider domains. See [forge-native.md](forge-native.md)
+for commands and operational gotchas.

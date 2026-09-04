@@ -1,0 +1,226 @@
+/**
+ * Provider-agnostic LLM layer (BYO key).
+ *
+ * The tenant admin picks a provider + model + API key in Docgrity settings
+ * (stored as a Forge KVS secret — never in SQL, never logged). Agents ask for
+ * capabilities (reason / embed); this module maps them to the configured
+ * provider. All output is JSON parsed and shape-checked — never free prose.
+ */
+import { fetch } from '@forge/api';
+import { kvs } from '@forge/kvs';
+
+const SETTINGS_KEY = 'llm-settings'; // {provider, model, embeddingModel}
+const SECRET_KEY = 'llm-api-key';
+
+export const PROVIDERS = {
+  gemini: {
+    label: 'Google Gemini',
+    defaultModel: 'gemini-2.0-flash',
+    defaultEmbeddingModel: 'text-embedding-004',
+    supportsEmbeddings: true,
+    models: [
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+    ],
+    embeddingModels: ['gemini-embedding-001', 'text-embedding-004'],
+  },
+  openai: {
+    label: 'OpenAI',
+    defaultModel: 'gpt-4o-mini',
+    defaultEmbeddingModel: 'text-embedding-3-small',
+    supportsEmbeddings: true,
+    models: ['gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
+    embeddingModels: ['text-embedding-3-small', 'text-embedding-3-large'],
+  },
+  anthropic: {
+    label: 'Anthropic Claude',
+    defaultModel: 'claude-3-5-haiku-latest',
+    defaultEmbeddingModel: null,
+    supportsEmbeddings: false,
+    models: [
+      'claude-sonnet-4-5',
+      'claude-opus-4-1',
+      'claude-sonnet-4-0',
+      'claude-3-7-sonnet-latest',
+      'claude-3-5-haiku-latest',
+    ],
+    embeddingModels: [],
+  },
+};
+
+export async function getLlmSettings() {
+  const settings = (await kvs.get(SETTINGS_KEY)) ?? null;
+  const hasKey = Boolean(await kvs.getSecret(SECRET_KEY));
+  return { settings, hasKey };
+}
+
+export async function saveLlmSettings({ provider, model, embeddingModel, apiKey }) {
+  if (!PROVIDERS[provider]) throw new Error(`Unknown provider: ${provider}`);
+  const p = PROVIDERS[provider];
+  await kvs.set(SETTINGS_KEY, {
+    provider,
+    model: model || p.defaultModel,
+    embeddingModel: embeddingModel || p.defaultEmbeddingModel,
+  });
+  if (apiKey) await kvs.setSecret(SECRET_KEY, apiKey);
+}
+
+async function requireConfig() {
+  const settings = await kvs.get(SETTINGS_KEY);
+  const apiKey = await kvs.getSecret(SECRET_KEY);
+  if (!settings || !apiKey) {
+    throw new Error('LLM not configured. Set a provider and API key in Docgrity settings.');
+  }
+  return { ...settings, apiKey };
+}
+
+/* ---------- Completion (JSON-typed) ---------- */
+
+/**
+ * Ask the configured model for a JSON object following `schemaHint`.
+ * Retries on malformed output. Returns {output, model}.
+ */
+export async function completeJson({ system, prompt, validate, maxRetries = 3 }) {
+  const cfg = await requireConfig();
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const raw = await complete(cfg, system, prompt);
+    try {
+      const parsed = JSON.parse(extractJson(raw));
+      const output = validate ? validate(parsed) : parsed;
+      return { output, model: `${cfg.provider}:${cfg.model}` };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error(`Model returned invalid JSON after ${maxRetries} attempts: ${lastError}`);
+}
+
+function extractJson(text) {
+  // Strip markdown fences the model may add despite instructions.
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenced ? fenced[1] : text;
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('no JSON object found');
+  return body.slice(start, end + 1);
+}
+
+async function complete(cfg, system, prompt) {
+  if (cfg.provider === 'gemini') {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' },
+        }),
+      }
+    );
+    const data = await checkResponse(res, 'gemini');
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  }
+  if (cfg.provider === 'openai') {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    });
+    const data = await checkResponse(res, 'openai');
+    return data.choices?.[0]?.message?.content ?? '';
+  }
+  if (cfg.provider === 'anthropic') {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: 2048,
+        system,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    const data = await checkResponse(res, 'anthropic');
+    return data.content?.[0]?.text ?? '';
+  }
+  throw new Error(`Unknown provider: ${cfg.provider}`);
+}
+
+/* ---------- Embeddings ---------- */
+
+export async function embed(texts) {
+  const cfg = await requireConfig();
+  if (cfg.provider === 'gemini') {
+    const out = [];
+    for (const text of texts) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${cfg.embeddingModel}:embedContent`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+          body: JSON.stringify({
+            content: { parts: [{ text: text.slice(0, 8000) }] },
+          }),
+        }
+      );
+      const data = await checkResponse(res, 'gemini');
+      out.push(data.embedding.values);
+    }
+    return out;
+  }
+  if (cfg.provider === 'openai') {
+    const res = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({ model: cfg.embeddingModel, input: texts.map((t) => t.slice(0, 8000)) }),
+    });
+    const data = await checkResponse(res, 'openai');
+    return data.data.map((d) => d.embedding);
+  }
+  throw new Error(
+    `Provider ${cfg.provider} does not support embeddings; similarity checks are unavailable.`
+  );
+}
+
+export async function supportsEmbeddings() {
+  const settings = await kvs.get(SETTINGS_KEY);
+  return Boolean(settings && PROVIDERS[settings.provider]?.supportsEmbeddings);
+}
+
+async function checkResponse(res, provider) {
+  if (!res.ok) {
+    const text = await res.text();
+    // Never echo API keys; provider error bodies are safe to log truncated.
+    throw new Error(`${provider} API error ${res.status}: ${text.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+export function cosineSimilarity(a, b) {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}

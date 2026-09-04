@@ -79,7 +79,7 @@ MVP priority: **high-confidence detection + explainability + ownership + comment
 3. **MVP 3** — Slack ingestion, decision detection, cross-source comparison, notifications.
 4. **MVP 4** — GitHub: repo indexing, ADR analysis, code/doc drift, CODEOWNERS.
 5. **MVP 5** — VS Code extension.
-6. **MVP 6** — full agentic platform: MCP registry, delegation, memory, scheduled scans,
+6. **MVP 6** — full agentic platform: connector registry, delegation, memory, scheduled scans,
    action policies.
 
 ## Killer demo (MVP 1 acceptance)

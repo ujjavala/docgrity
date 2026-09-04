@@ -4,9 +4,9 @@
  * Three levels: stats overview → filtered findings list (sortable) →
  * finding detail (evidence, page links, potential owners).
  *
- * Thin by design: renders data fetched from the Docgrity backend via
- * Forge Remote (invokeRemote attaches the Forge Invocation Token, which the
- * backend verifies). No analysis logic runs inside the Forge runtime.
+ * Forge-native: all data comes from resolvers (invoke). Analysis runs in
+ * async-event consumers inside the Forge runtime; the tenant brings their
+ * own LLM provider + API key (Settings).
  */
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, {
@@ -22,10 +22,11 @@ import ForgeReconciler, {
   Spinner,
   Stack,
   Text,
+  Textfield,
   User,
   xcss,
 } from '@forge/react';
-import { invokeRemote } from '@forge/bridge';
+import { invoke } from '@forge/bridge';
 
 const SEVERITY_APPEARANCE = {
   CRITICAL: 'removed',
@@ -59,19 +60,11 @@ const cardStyle = xcss({
   minWidth: '160px',
 });
 
-const get = async (path) => {
-  const res = await invokeRemote({ path, method: 'GET' });
-  return res.body;
-};
+const settingsFormStyle = xcss({
+  maxWidth: '480px',
+});
 
-const post = async (path, body) => {
-  const res = await invokeRemote({ path, method: 'POST', body });
-  if (res.status >= 400) {
-    const detail = res.body?.detail ?? res.body?.error ?? `HTTP ${res.status}`;
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
-  }
-  return res.body;
-};
+const call = (fn, payload) => invoke(fn, payload);
 
 /* ---------- Human-approved actions ---------- */
 
@@ -127,7 +120,7 @@ const ActionsPanel = ({ finding, pages, onDone }) => {
                   'Post a Docgrity comment on the page @-mentioning the inferred owner so they can review this finding?',
                 run: () =>
                   run(
-                    () => post(`/api/v1/findings/${finding.id}/actions/notify-owner`),
+                    () => call('notifyOwner', { id: finding.id }),
                     'Owner notification queued — the Docgrity comment will appear on the page shortly.',
                   ),
               })
@@ -152,7 +145,8 @@ const ActionsPanel = ({ finding, pages, onDone }) => {
                     run: () =>
                       run(
                         () =>
-                          post(`/api/v1/findings/${finding.id}/actions/merge-redirect`, {
+                          call('mergeRedirect', {
+                            id: finding.id,
                             keep_item_id: keep.id,
                           }),
                         `Archived “${other.title}” with a redirect to “${keep.title}”.`,
@@ -175,7 +169,7 @@ const ActionsPanel = ({ finding, pages, onDone }) => {
             onClick={() =>
               run(
                 async () =>
-                  setDraft(await post(`/api/v1/findings/${finding.id}/actions/draft-fix`)),
+                  setDraft(await call('draftFix', { id: finding.id })),
                 null,
               )
             }
@@ -209,7 +203,8 @@ const ActionsPanel = ({ finding, pages, onDone }) => {
                     run: () =>
                       run(
                         () =>
-                          post(`/api/v1/findings/${finding.id}/actions/apply-fix`, {
+                          call('applyFix', {
+                            id: finding.id,
                             page_external_id: p.page_external_id,
                             find_text: p.find_text,
                             replace_text: p.replace_text,
@@ -250,7 +245,7 @@ const FindingDetail = ({ findingId, onBack }) => {
   const [error, setError] = useState(null);
 
   const reload = () => {
-    get(`/api/v1/findings/${findingId}`).then(setFinding).catch((e) => setError(String(e)));
+    call('getFinding', { id: findingId }).then(setFinding).catch((e) => setError(String(e)));
   };
 
   useEffect(() => {
@@ -381,8 +376,7 @@ const FindingsList = ({ type, onBack, onOpen }) => {
   const [ignoring, setIgnoring] = useState(null);
 
   const load = () => {
-    const query = type ? `&type=${type}` : '';
-    get(`/api/v1/findings?limit=100${query}`)
+    call('listFindings', { type: type ?? null, limit: 100 })
       .then(setFindings)
       .catch((e) => setError(String(e)));
   };
@@ -392,7 +386,7 @@ const FindingsList = ({ type, onBack, onOpen }) => {
   const ignore = async (id) => {
     setIgnoring(id);
     try {
-      await post(`/api/v1/findings/${id}/status`, { status: 'DISMISSED' });
+      await call('setFindingStatus', { id, status: 'DISMISSED' });
       load();
     } catch (e) {
       setError(String(e));
@@ -526,7 +520,7 @@ const StatCard = ({ label, count, emphasis, onClick }) => (
   </Stack>
 );
 
-const Overview = ({ onDrill }) => {
+const Overview = ({ onDrill, onSettings }) => {
   const [stats, setStats] = useState(null);
   const [error, setError] = useState(null);
   const [scanning, setScanning] = useState(false);
@@ -535,12 +529,12 @@ const Overview = ({ onDrill }) => {
   const [space, setSpace] = useState(null); // { label, value } or null = all spaces
 
   const loadStats = () => {
-    get('/api/v1/findings/stats').then(setStats).catch((e) => setError(String(e)));
+    call('getStats').then(setStats).catch((e) => setError(String(e)));
   };
 
   useEffect(() => {
     loadStats();
-    get('/api/v1/spaces')
+    call('getSpaces')
       .then((list) =>
         setSpaces((list ?? []).map((s) => ({ label: `${s.name} (${s.key})`, value: s.id }))),
       )
@@ -551,10 +545,10 @@ const Overview = ({ onDrill }) => {
     setScanning(true);
     setScanMessage(null);
     try {
-      await invokeRemote({
-        path: '/api/v1/scans',
-        method: 'POST',
-        body: { checks: CHECKS, post_comments: false, space_id: space?.value ?? null },
+      await call('createScan', {
+        checks: CHECKS,
+        post_comments: false,
+        space_id: space?.value ?? null,
       });
       setScanMessage(
         `Scan started for ${space ? space.label : 'all ingested spaces'} — duplicates, contradictions and open questions. Refresh in a few minutes.`,
@@ -568,9 +562,22 @@ const Overview = ({ onDrill }) => {
 
   if (error) {
     return (
-      <SectionMessage appearance="error" title="Docgrity could not load stats">
-        <Text>{error}</Text>
-      </SectionMessage>
+      <Stack space="space.200">
+        <SectionMessage appearance="error" title="Docgrity could not load stats">
+          <Text>{error}</Text>
+        </SectionMessage>
+        <Inline space="space.100">
+          <Button onClick={onSettings}>Settings — configure AI provider</Button>
+          <Button
+            onClick={() => {
+              setError(null);
+              loadStats();
+            }}
+          >
+            Retry
+          </Button>
+        </Inline>
+      </Stack>
     );
   }
   if (!stats) return <Spinner label="Loading dashboard…" />;
@@ -598,6 +605,7 @@ const Overview = ({ onDrill }) => {
           {scanning ? 'Requesting…' : 'Run full scan'}
         </Button>
         <Button onClick={loadStats}>Refresh</Button>
+        <Button onClick={onSettings}>Settings</Button>
       </Inline>
       {scanMessage && (
         <SectionMessage appearance="information">
@@ -641,6 +649,133 @@ const Overview = ({ onDrill }) => {
   );
 };
 
+/* ---------- Settings: bring-your-own LLM provider + key ---------- */
+
+const SettingsView = ({ onBack }) => {
+  const [data, setData] = useState(null);
+  const [provider, setProvider] = useState(null); // {label, value}
+  const [model, setModel] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    call('getSettings')
+      .then((d) => {
+        setData(d);
+        if (d.settings) {
+          const p = d.providers.find((x) => x.id === d.settings.provider);
+          if (p) setProvider({ label: p.label, value: p.id });
+          setModel(d.settings.model ?? '');
+        }
+      })
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  if (error) {
+    return (
+      <SectionMessage appearance="error" title="Could not load settings">
+        <Text>{error}</Text>
+      </SectionMessage>
+    );
+  }
+  if (!data) return <Spinner label="Loading settings…" />;
+
+  const selected = provider ? data.providers.find((p) => p.id === provider.value) : null;
+
+  const save = async () => {
+    setSaving(true);
+    setMessage(null);
+    setError(null);
+    try {
+      await call('saveSettings', {
+        provider: provider.value,
+        model: model || undefined,
+        apiKey: apiKey || undefined,
+      });
+      setApiKey('');
+      setMessage('Settings saved. Your API key is stored encrypted and never leaves your site.');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Stack space="space.200">
+      <Button appearance="subtle" onClick={onBack}>
+        ← Back to overview
+      </Button>
+      <Heading as="h2">Settings — AI provider</Heading>
+      <Text>
+        Docgrity runs entirely on your Atlassian site. Analysis uses your own AI provider
+        account: choose a provider, pick a model, and paste your API key. The key is stored as an
+        encrypted Forge secret and is only used to call the provider you choose.
+      </Text>
+      {message && (
+        <SectionMessage appearance="success">
+          <Text>{message}</Text>
+        </SectionMessage>
+      )}
+      {!data.isAdmin && (
+        <SectionMessage appearance="warning" title="Admin only">
+          <Text>
+            Only Confluence site admins can change the AI provider settings. You can view the
+            current configuration below.
+          </Text>
+        </SectionMessage>
+      )}
+      <Stack space="space.100" xcss={settingsFormStyle}>
+        <Text>Provider</Text>
+        <Select
+          placeholder="Choose a provider"
+          options={data.providers.map((p) => ({ label: p.label, value: p.id }))}
+          value={provider}
+          onChange={(v) => {
+            setProvider(v);
+            const p = data.providers.find((x) => x.id === v?.value);
+            setModel(p?.defaultModel ?? '');
+          }}
+        />
+        <Text>Model</Text>
+        <Select
+          placeholder="Choose a model"
+          isDisabled={!selected}
+          options={(selected?.models ?? []).map((m) => ({ label: m, value: m }))}
+          value={model ? { label: model, value: model } : null}
+          onChange={(v) => setModel(v?.value ?? '')}
+        />
+        <Text>{data.hasKey ? 'API key (already set — enter to replace)' : 'API key'}</Text>
+        <Textfield
+          type="password"
+          placeholder="paste your provider API key"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+        />
+        {selected && !selected.supportsEmbeddings && (
+          <SectionMessage appearance="warning" title="No embeddings on this provider">
+            <Text>
+              This provider has no embeddings API, so duplicate/contradiction candidate selection
+              falls back to comparing a capped number of page pairs directly.
+            </Text>
+          </SectionMessage>
+        )}
+        <Inline>
+          <Button
+            appearance="primary"
+            isDisabled={saving || !provider || (!apiKey && !data.hasKey) || !data.isAdmin}
+            onClick={save}
+          >
+            {saving ? 'Saving…' : 'Save settings'}
+          </Button>
+        </Inline>
+      </Stack>
+    </Stack>
+  );
+};
+
 /* ---------- Router ---------- */
 
 const App = () => {
@@ -655,6 +790,9 @@ const App = () => {
       />
     );
   }
+  if (view.level === 'settings') {
+    return <SettingsView onBack={() => setView({ level: 'overview' })} />;
+  }
   if (view.level === 'list') {
     return (
       <FindingsList
@@ -664,7 +802,12 @@ const App = () => {
       />
     );
   }
-  return <Overview onDrill={(type) => setView({ level: 'list', type })} />;
+  return (
+    <Overview
+      onDrill={(type) => setView({ level: 'list', type })}
+      onSettings={() => setView({ level: 'settings' })}
+    />
+  );
 };
 
 ForgeReconciler.render(

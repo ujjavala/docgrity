@@ -38,7 +38,7 @@ with useful evidence.
 ## Reproducibility
 
 Every finding stores `model`, `prompt_version`, `temperature`, `input_hash`. Prompt changes
-bump the version (`prompts/<agent>/v<N>.md`); the eval harness runs the dataset against the
+bump the version (versioned `PROMPTS` in `apps/forge/src/agents.js`); the eval harness runs the dataset against the
 new version before it ships and compares against the previous baseline.
 
 ## Harness

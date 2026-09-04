@@ -5,8 +5,13 @@
   "description": "Docgrity for Confluence — find what your organisation doesn't agree on.",
   "license": "UNLICENSED",
   "dependencies": {
+    "@forge/api": "^8.0.5",
     "@forge/bridge": "^4.0.0",
+    "@forge/events": "^3.0.5",
+    "@forge/kvs": "^2.0.5",
     "@forge/react": "^11.0.0",
+    "@forge/resolver": "^2.0.0",
+    "@forge/sql": "^4.0.5",
     "react": "^18.2.0"
   }
 }

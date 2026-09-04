@@ -4,8 +4,10 @@
 
 - Specialised agents, controlled by deterministic orchestration — not an uncontrolled swarm.
 - Agents communicate through **structured task messages**, never free-form chat.
-- Agents access external systems **only via MCP tools** on an explicit allowlist.
-- Every LLM output is a typed Pydantic schema. No prose parsing.
+- Agents access external systems **only through the connector modules** (`confluence.js`
+  for Confluence, `llm.js` for LLM providers) — never direct API calls.
+- Every LLM output is typed JSON validated in code (`completeJson` + validators in
+  `agents.js`). No prose parsing.
 - Every inference has a confidence score; every finding has evidence.
 - External source content is **untrusted data** and is always delimited as such in prompts.
 - Destructive or consequential actions require policy approval and human confirmation.
@@ -93,12 +95,13 @@ evaluation and is audited.
 
 ## Prompt management
 
-Prompts live in `prompts/<agent>/v<N>.md` and are versioned. Every finding records
-`model`, `prompt_version`, `temperature`, and `input_hash` for evaluation and reproducibility.
+Prompts live as versioned constants in `apps/forge/src/agents.js` (`PROMPTS`, e.g.
+duplicate v1, contradiction v1, action v2, editor v1). Every finding records `model` and
+`prompt_version` for evaluation and reproducibility.
 
 ## Memory
 
 - **Working memory** — current task context (assembled per task; retrieval, never full-corpus dumps).
-- **Knowledge memory** — persisted knowledge items, claims, entities, findings (PostgreSQL).
+- **Knowledge memory** — persisted knowledge items, findings, evidence (Forge SQL).
 - **Agent memory** — previous task outcomes (`agent_task`).
 - **Source memory** — source metadata, versions, scan history.

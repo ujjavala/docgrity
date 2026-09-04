@@ -2,55 +2,55 @@
 
 **Find what your organisation doesn't agree on — and get the right person to fix it.**
 
-Docgrity is an agentic knowledge-integrity platform that continuously checks whether an
-organisation's documentation, code, decisions and conversations agree with each other.
-MVP 1 targets Confluence: duplicate detection, ownership inference, findings with evidence,
-and Confluence comments — distributed as an Atlassian Forge app with analysis in an external
-backend.
+Docgrity is an agentic knowledge-integrity platform that checks whether an organisation's
+documentation agrees with itself: duplicate pages, contradictory claims, unanswered open
+questions — each finding backed by evidence and linked to *potential* owners.
+
+Two zero-infrastructure implementations:
+
+1. **Atlassian Forge app** (`apps/forge`) — ships to the Atlassian Marketplace. Runs
+   entirely on Forge (SQL, async events, scheduled triggers). Tenants bring their own
+   LLM API key (Gemini / OpenAI / Anthropic) and get a dashboard, Confluence comments,
+   and a Rovo agent. See [docs/forge-native.md](docs/forge-native.md).
+2. **VS Code extension** (planned) — same checks for repository docs, powered by the
+   user's own GitHub Copilot subscription via `vscode.lm`.
+   See [docs/vscode-extension.md](docs/vscode-extension.md).
+
+> The original FastAPI/PostgreSQL reference implementation is preserved in git history
+> (checkpoint commit) and was removed from the working tree after the Forge-native port.
 
 ## Documentation
 
 - [Product requirements](docs/product-requirements.md)
 - [Architecture](docs/architecture.md)
+- [Forge-native implementation](docs/forge-native.md)
+- [VS Code extension plan](docs/vscode-extension.md)
 - [Agent architecture](docs/agent-architecture.md)
-- [MCP architecture](docs/mcp-architecture.md)
 - [Knowledge model](docs/knowledge-model.md)
 - [Security](docs/security.md)
 - [Evaluation](docs/evaluation.md)
 
-## Development
+## Development (Forge app)
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), Docker.
-
-```bash
-cp .env.example .env          # fill in credentials
-uv sync                       # install dependencies
-docker compose up -d postgres redis
-uv run alembic upgrade head   # apply migrations
-uv run uvicorn docgrity.api.main:app --reload   # API at http://localhost:8000
-uv run pytest                 # tests
-uv run ruff check .           # lint
-```
-
-Or run the whole stack in containers:
+Prerequisites: Node 22+, [Forge CLI](https://developer.atlassian.com/platform/forge/getting-started/) (`npm i -g @forge/cli`), an Atlassian developer site.
 
 ```bash
-docker compose up --build
+cd apps/forge
+npm install
+forge lint
+forge deploy --environment development --no-verify --non-interactive
+forge install --site <your-site>.atlassian.net --product confluence \
+  --environment development
 ```
+
+Then in Confluence: **Apps → Docgrity → Settings**, choose an AI provider and paste an
+API key (site admins only), and run a scan.
 
 ## Repository layout
 
 ```
-apps/forge/        Atlassian Forge app (Confluence surface)
-src/docgrity/
-  api/             FastAPI application
-  agents/          duplicate, ownership, action, verification
-  mcp/confluence/  Confluence MCP server + REST client
-  core/            models, schemas, llm router, policies, config
-  workflows/       scan + ingestion pipelines (arq)
-prompts/           versioned prompt files
-evaluations/       eval datasets + harness
-migrations/        Alembic
-docs/              architecture documents
-tests/
+apps/forge/          Forge app: manifest, resolvers, agents, consumers, UI
+  src/               backend functions (see docs/forge-native.md)
+  src/frontend/      UI Kit dashboard + settings
+docs/                architecture and implementation documents
 ```
