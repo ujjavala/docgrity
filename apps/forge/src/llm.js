@@ -12,6 +12,9 @@ import { kvs } from '@forge/kvs';
 const SETTINGS_KEY = 'llm-settings'; // {provider, model, embeddingModel}
 const SECRET_KEY = 'llm-api-key';
 
+// `models`/`embeddingModels` here are a static FALLBACK catalog, used only
+// until an API key is available — listModels() fetches the live list from
+// each provider's /models endpoint.
 export const PROVIDERS = {
   gemini: {
     label: 'Google Gemini',
@@ -75,6 +78,82 @@ async function requireConfig() {
     throw new Error('LLM not configured. Set a provider and API key in Docgrity settings.');
   }
   return { ...settings, apiKey };
+}
+
+/* ---------- Live model listing ---------- */
+
+/**
+ * Fetch the current model list from the provider's own /models API.
+ * `apiKey` may be a transient key from the settings form; otherwise the stored
+ * secret is used. Falls back to the static catalog if no key or the call fails.
+ * Returns {models, embeddingModels, live}.
+ */
+export async function listModels(provider, apiKey = null) {
+  const p = PROVIDERS[provider];
+  if (!p) throw new Error(`Unknown provider: ${provider}`);
+  const key = apiKey || (await kvs.getSecret(SECRET_KEY));
+  const fallback = { models: p.models, embeddingModels: p.embeddingModels, live: false };
+  if (!key) return fallback;
+  try {
+    if (provider === 'gemini') {
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
+        { headers: { 'x-goog-api-key': key } },
+      );
+      if (!res.ok) throw new Error(`Gemini models API: ${res.status}`);
+      const data = await res.json();
+      const all = (data.models ?? []).map((m) => ({
+        id: (m.name ?? '').replace(/^models\//, ''),
+        methods: m.supportedGenerationMethods ?? [],
+      }));
+      return {
+        models: all
+          .filter((m) => m.methods.includes('generateContent') && m.id.startsWith('gemini-'))
+          .map((m) => m.id)
+          .sort()
+          .reverse(),
+        embeddingModels: all
+          .filter((m) => m.methods.includes('embedContent'))
+          .map((m) => m.id)
+          .sort(),
+        live: true,
+      };
+    }
+    if (provider === 'openai') {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        headers: { Authorization: `Bearer ${key}` },
+      });
+      if (!res.ok) throw new Error(`OpenAI models API: ${res.status}`);
+      const data = await res.json();
+      const ids = (data.data ?? []).map((m) => m.id);
+      const excluded =
+        /instruct|embedding|audio|realtime|tts|whisper|transcribe|moderation|image|dall-e|search|davinci|babbage|codex/;
+      return {
+        models: ids
+          .filter((id) => /^(gpt-|o\d)/.test(id) && !excluded.test(id))
+          .sort()
+          .reverse(),
+        embeddingModels: ids.filter((id) => id.includes('embedding')).sort(),
+        live: true,
+      };
+    }
+    if (provider === 'anthropic') {
+      const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      });
+      if (!res.ok) throw new Error(`Anthropic models API: ${res.status}`);
+      const data = await res.json();
+      return {
+        models: (data.data ?? []).map((m) => m.id),
+        embeddingModels: [],
+        live: true,
+      };
+    }
+    return fallback;
+  } catch (err) {
+    console.warn(`listModels(${provider}) fell back to static catalog:`, String(err));
+    return fallback;
+  }
 }
 
 /* ---------- Completion (JSON-typed) ---------- */

@@ -10,7 +10,7 @@ import { Queue } from '@forge/events';
 import { draftFix } from './agents';
 import { archivePage, getPage, isSiteAdmin, listSpaces, updatePage } from './confluence';
 import { audit, execute, query, uuid } from './db';
-import { getLlmSettings, PROVIDERS, saveLlmSettings } from './llm';
+import { getLlmSettings, listModels, PROVIDERS, saveLlmSettings } from './llm';
 
 const resolver = new Resolver();
 const scansQueue = new Queue({ key: 'scans' });
@@ -56,6 +56,14 @@ resolver.define('saveSettings', async ({ payload, context }) => {
     detail: { provider: payload.provider, model: payload.model }, // never the key
   });
   return { ok: true };
+});
+
+// Live model list from the provider's own /models API. Accepts a transient
+// apiKey from the settings form (before save); otherwise uses the stored
+// secret. Falls back to the static catalog. The key is never returned.
+resolver.define('listModels', async ({ payload }) => {
+  const { provider, apiKey = null } = payload ?? {};
+  return listModels(provider, apiKey || null);
 });
 
 /* ---------- Spaces & scans ---------- */

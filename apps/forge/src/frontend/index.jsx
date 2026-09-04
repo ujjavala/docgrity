@@ -656,6 +656,7 @@ const SettingsView = ({ onBack }) => {
   const [provider, setProvider] = useState(null); // {label, value}
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [modelList, setModelList] = useState(null); // {models, live} from listModels
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
@@ -672,6 +673,22 @@ const SettingsView = ({ onBack }) => {
       })
       .catch((e) => setError(String(e)));
   }, []);
+
+  // Live model list: provider's own /models API via the stored key, or the
+  // key currently typed in the form (debounced). Falls back to the catalog.
+  useEffect(() => {
+    if (!provider) return;
+    setModelList(null);
+    const t = setTimeout(
+      () => {
+        call('listModels', { provider: provider.value, apiKey: apiKey || undefined })
+          .then(setModelList)
+          .catch(() => setModelList(null));
+      },
+      apiKey ? 600 : 0,
+    );
+    return () => clearTimeout(t);
+  }, [provider, apiKey]);
 
   if (error) {
     return (
@@ -739,11 +756,14 @@ const SettingsView = ({ onBack }) => {
             setModel(p?.defaultModel ?? '');
           }}
         />
-        <Text>Model</Text>
+        <Text>Model{modelList?.live ? ' (live list from provider)' : ''}</Text>
         <Select
           placeholder="Choose a model"
           isDisabled={!selected}
-          options={(selected?.models ?? []).map((m) => ({ label: m, value: m }))}
+          options={(modelList?.models ?? selected?.models ?? []).map((m) => ({
+            label: m,
+            value: m,
+          }))}
           value={model ? { label: model, value: model } : null}
           onChange={(v) => setModel(v?.value ?? '')}
         />
