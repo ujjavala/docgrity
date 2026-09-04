@@ -160,14 +160,15 @@ resolver.define('dismissScanError', async ({ payload }) => {
 
 resolver.define('listFindings', async ({ payload }) => {
   const { type = null, limit = 100 } = payload ?? {};
+  const lim = Math.min(Number(limit) || 100, 500);
+  // Hide ignored/resolved findings — they're kept for dedupe/audit, not display.
+  const visible = `status NOT IN ('DISMISSED', 'RESOLVED', 'FALSE_POSITIVE')`;
   const rows = type
     ? await query(
-        `SELECT * FROM finding WHERE type = ? ORDER BY created_at DESC LIMIT ${Math.min(Number(limit) || 100, 500)}`,
+        `SELECT * FROM finding WHERE type = ? AND ${visible} ORDER BY created_at DESC LIMIT ${lim}`,
         [type]
       )
-    : await query(
-        `SELECT * FROM finding ORDER BY created_at DESC LIMIT ${Math.min(Number(limit) || 100, 500)}`
-      );
+    : await query(`SELECT * FROM finding WHERE ${visible} ORDER BY created_at DESC LIMIT ${lim}`);
   const out = [];
   for (const f of rows) {
     const owners = await query(
