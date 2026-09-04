@@ -122,11 +122,21 @@ async function computeStats() {
   const lastScan = await query(
     `SELECT completed_at FROM scan WHERE status = 'COMPLETED' ORDER BY completed_at DESC LIMIT 1`
   );
+  // Most recent failure since the last successful scan — surfaced as a banner.
+  const lastFailed = await query(
+    `SELECT completed_at, error FROM scan WHERE status = 'FAILED' ORDER BY completed_at DESC LIMIT 1`
+  );
+  const failedIsCurrent =
+    lastFailed[0] &&
+    (!lastScan[0] || new Date(lastFailed[0].completed_at) > new Date(lastScan[0].completed_at));
   return {
     total_open: byType.reduce((sum, r) => sum + Number(r.n), 0),
     by_type: Object.fromEntries(byType.map((r) => [r.type, Number(r.n)])),
     by_severity: Object.fromEntries(bySeverity.map((r) => [r.severity, Number(r.n)])),
     last_scan_completed_at: lastScan[0]?.completed_at ?? null,
+    last_scan_error: failedIsCurrent
+      ? { at: lastFailed[0].completed_at, message: String(lastFailed[0].error ?? '').slice(0, 500) }
+      : null,
   };
 }
 

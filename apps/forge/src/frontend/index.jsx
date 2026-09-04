@@ -612,6 +612,14 @@ const Overview = ({ onDrill, onSettings }) => {
           <Text>{scanMessage}</Text>
         </SectionMessage>
       )}
+      {stats.last_scan_error && (
+        <SectionMessage appearance="error" title="Last scan failed">
+          <Text>{stats.last_scan_error.message}</Text>
+          <Text>
+            {`Failed at ${new Date(stats.last_scan_error.at).toLocaleString()}. Check your AI provider account (billing/quota) or update the key in Settings, then run the scan again.`}
+          </Text>
+        </SectionMessage>
+      )}
 
       <Heading as="h3">Open findings</Heading>
       <Inline space="space.200" shouldWrap>
