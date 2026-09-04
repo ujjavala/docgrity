@@ -32,7 +32,7 @@ export const PROVIDERS = {
   gemini: {
     label: 'Google Gemini',
     defaultModel: 'gemini-2.0-flash',
-    defaultEmbeddingModel: 'text-embedding-004',
+    defaultEmbeddingModel: 'gemini-embedding-001',
     supportsEmbeddings: true,
     models: [
       'gemini-2.5-pro',
@@ -41,7 +41,7 @@ export const PROVIDERS = {
       'gemini-2.0-flash',
       'gemini-2.0-flash-lite',
     ],
-    embeddingModels: ['gemini-embedding-001', 'text-embedding-004'],
+    embeddingModels: ['gemini-embedding-001'],
   },
   openai: {
     label: 'OpenAI',
@@ -89,6 +89,11 @@ async function requireConfig() {
   const apiKey = settings ? await getProviderKey(settings.provider) : null;
   if (!settings || !apiKey) {
     throw new Error('LLM not configured. Set a provider and API key in Docgrity settings.');
+  }
+  // Self-heal retired embedding models saved by earlier versions.
+  if (settings.provider === 'gemini' && settings.embeddingModel === 'text-embedding-004') {
+    settings.embeddingModel = 'gemini-embedding-001';
+    await kvs.set(SETTINGS_KEY, settings);
   }
   return { ...settings, apiKey };
 }
