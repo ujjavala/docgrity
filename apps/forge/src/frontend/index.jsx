@@ -782,10 +782,19 @@ const SettingsView = ({ onBack }) => {
         <Text>{data.hasKey ? 'API key (already set — enter to replace)' : 'API key'}</Text>
         <Textfield
           type="password"
-          placeholder="paste your provider API key"
+          placeholder={selected?.keyless ? 'not needed for this provider' : 'paste your provider API key'}
+          isDisabled={Boolean(selected?.keyless)}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
         />
+        {selected?.keyless && (
+          <SectionMessage appearance="warning" title="Local development only">
+            <Text>
+              Ollama runs on your own machine, so this only works while the app is running
+              through `forge tunnel` on the same machine. The deployed app cannot reach it.
+            </Text>
+          </SectionMessage>
+        )}
         {selected && !selected.supportsEmbeddings && (
           <SectionMessage appearance="warning" title="No embeddings on this provider">
             <Text>
@@ -797,7 +806,12 @@ const SettingsView = ({ onBack }) => {
         <Inline>
           <Button
             appearance="primary"
-            isDisabled={saving || !provider || (!apiKey && !data.hasKey) || !data.isAdmin}
+            isDisabled={
+              saving ||
+              !provider ||
+              (!selected?.keyless && !apiKey && !data.hasKey) ||
+              !data.isAdmin
+            }
             onClick={save}
           >
             {saving ? 'Saving…' : 'Save settings'}

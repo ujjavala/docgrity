@@ -29,6 +29,7 @@ resolver.define('getSettings', async ({ context }) => {
       label: p.label,
       defaultModel: p.defaultModel,
       supportsEmbeddings: p.supportsEmbeddings,
+      keyless: Boolean(p.keyless),
       models: p.models,
       embeddingModels: p.embeddingModels,
     })),

@@ -65,11 +65,31 @@ export const PROVIDERS = {
     ],
     embeddingModels: [],
   },
+  // DEV ONLY: local Ollama. Only reachable when running `forge tunnel`
+  // (functions execute on your machine); the deployed app cannot reach
+  // localhost. Keyless.
+  ollama: {
+    label: 'Ollama (local dev — requires forge tunnel)',
+    defaultModel: 'llama3.1:8b',
+    defaultEmbeddingModel: 'nomic-embed-text',
+    supportsEmbeddings: true,
+    keyless: true,
+    models: ['llama3.1:8b', 'llama3.2:3b', 'qwen2.5:7b', 'mistral:7b'],
+    embeddingModels: ['nomic-embed-text', 'mxbai-embed-large'],
+  },
 };
+
+const OLLAMA_BASE_URL = 'http://localhost:11434';
+// Ollama is only reachable in tunnel mode; use the runtime's native fetch so
+// the call isn't subject to the manifest egress allowlist (dev machine only).
+const localFetch = globalThis.fetch;
 
 export async function getLlmSettings() {
   const settings = (await kvs.get(SETTINGS_KEY)) ?? null;
-  const hasKey = Boolean(settings?.provider && (await getProviderKey(settings.provider)));
+  const hasKey = Boolean(
+    settings?.provider &&
+      (PROVIDERS[settings.provider]?.keyless || (await getProviderKey(settings.provider)))
+  );
   return { settings, hasKey };
 }
 
@@ -86,8 +106,9 @@ export async function saveLlmSettings({ provider, model, embeddingModel, apiKey 
 
 async function requireConfig() {
   const settings = await kvs.get(SETTINGS_KEY);
-  const apiKey = settings ? await getProviderKey(settings.provider) : null;
-  if (!settings || !apiKey) {
+  const keyless = settings && PROVIDERS[settings.provider]?.keyless;
+  const apiKey = settings && !keyless ? await getProviderKey(settings.provider) : null;
+  if (!settings || (!keyless && !apiKey)) {
     throw new Error('LLM not configured. Set a provider and API key in Docgrity settings.');
   }
   // Self-heal retired embedding models saved by earlier versions.
@@ -111,8 +132,19 @@ export async function listModels(provider, apiKey = null) {
   if (!p) throw new Error(`Unknown provider: ${provider}`);
   const key = apiKey || (await getProviderKey(provider));
   const fallback = { models: p.models, embeddingModels: p.embeddingModels, live: false };
-  if (!key) return fallback;
+  if (!key && !p.keyless) return fallback;
   try {
+    if (provider === 'ollama') {
+      const res = await localFetch(`${OLLAMA_BASE_URL}/api/tags`);
+      if (!res.ok) throw new Error(`Ollama tags API: ${res.status}`);
+      const data = await res.json();
+      const names = (data.models ?? []).map((m) => m.name);
+      return {
+        models: names.filter((n) => !/embed/.test(n)),
+        embeddingModels: names.filter((n) => /embed/.test(n)),
+        live: true,
+      };
+    }
     if (provider === 'gemini') {
       const res = await fetch(
         'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
@@ -262,6 +294,22 @@ async function complete(cfg, system, prompt) {
     const data = await checkResponse(res, 'anthropic');
     return data.content?.[0]?.text ?? '';
   }
+  if (cfg.provider === 'ollama') {
+    const res = await localFetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: prompt },
+        ],
+        response_format: { type: 'json_object' },
+      }),
+    });
+    const data = await checkResponse(res, 'ollama');
+    return data.choices?.[0]?.message?.content ?? '';
+  }
   throw new Error(`Unknown provider: ${cfg.provider}`);
 }
 
@@ -299,6 +347,15 @@ export async function embed(texts) {
       return checkResponse(res, 'openai');
     });
     return data.data.map((d) => d.embedding);
+  }
+  if (cfg.provider === 'ollama') {
+    const res = await localFetch(`${OLLAMA_BASE_URL}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: cfg.embeddingModel, input: texts.map((t) => t.slice(0, 8000)) }),
+    });
+    const data = await checkResponse(res, 'ollama');
+    return data.embeddings;
   }
   throw new Error(
     `Provider ${cfg.provider} does not support embeddings; similarity checks are unavailable.`
