@@ -69,16 +69,23 @@ export const PROVIDERS = {
   // HTTPS-only, so http://localhost is not reachable). Run:
   //   cloudflared tunnel --url http://localhost:11434
   // and paste the https URL as the base URL in Settings. Keyless.
-  ollama: {
-    label: 'Ollama (local dev — via HTTPS tunnel)',
-    defaultModel: 'llama3.1:8b',
-    defaultEmbeddingModel: 'nomic-embed-text',
-    supportsEmbeddings: true,
-    keyless: true,
-    needsBaseUrl: true,
-    models: ['llama3.1:8b', 'llama3.2:3b', 'qwen2.5:7b', 'mistral:7b'],
-    embeddingModels: ['nomic-embed-text', 'mxbai-embed-large'],
-  },
+  // Gated behind the per-environment Forge variable ENABLE_DEV_PROVIDERS
+  // (set via `forge variables set ENABLE_DEV_PROVIDERS true -e development`),
+  // so it never appears in production / Marketplace builds.
+  ...(process.env.ENABLE_DEV_PROVIDERS === 'true'
+    ? {
+        ollama: {
+          label: 'Ollama (local dev — via HTTPS tunnel)',
+          defaultModel: 'llama3.1:8b',
+          defaultEmbeddingModel: 'nomic-embed-text',
+          supportsEmbeddings: true,
+          keyless: true,
+          needsBaseUrl: true,
+          models: ['llama3.1:8b', 'llama3.2:3b', 'qwen2.5:7b', 'mistral:7b'],
+          embeddingModels: ['nomic-embed-text', 'mxbai-embed-large'],
+        },
+      }
+    : {}),
 };
 
 function ollamaBaseUrl(settings) {
