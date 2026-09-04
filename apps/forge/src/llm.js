@@ -65,24 +65,31 @@ export const PROVIDERS = {
     ],
     embeddingModels: [],
   },
-  // DEV ONLY: local Ollama. Only reachable when running `forge tunnel`
-  // (functions execute on your machine); the deployed app cannot reach
-  // localhost. Keyless.
+  // DEV ONLY: local Ollama exposed via an HTTPS tunnel (the Forge runtime is
+  // HTTPS-only, so http://localhost is not reachable). Run:
+  //   cloudflared tunnel --url http://localhost:11434
+  // and paste the https URL as the base URL in Settings. Keyless.
   ollama: {
-    label: 'Ollama (local dev — requires forge tunnel)',
+    label: 'Ollama (local dev — via HTTPS tunnel)',
     defaultModel: 'llama3.1:8b',
     defaultEmbeddingModel: 'nomic-embed-text',
     supportsEmbeddings: true,
     keyless: true,
+    needsBaseUrl: true,
     models: ['llama3.1:8b', 'llama3.2:3b', 'qwen2.5:7b', 'mistral:7b'],
     embeddingModels: ['nomic-embed-text', 'mxbai-embed-large'],
   },
 };
 
-const OLLAMA_BASE_URL = 'http://localhost:11434';
-// Ollama is only reachable in tunnel mode; use the runtime's native fetch so
-// the call isn't subject to the manifest egress allowlist (dev machine only).
-const localFetch = globalThis.fetch;
+function ollamaBaseUrl(settings) {
+  const url = settings?.baseUrl;
+  if (!url || !/^https:\/\//.test(url)) {
+    throw new Error(
+      'Ollama needs an HTTPS base URL (Forge cannot reach http://localhost). Run: cloudflared tunnel --url http://localhost:11434 and paste the https URL in Settings.'
+    );
+  }
+  return url.replace(/\/$/, '');
+}
 
 export async function getLlmSettings() {
   const settings = (await kvs.get(SETTINGS_KEY)) ?? null;
@@ -93,13 +100,14 @@ export async function getLlmSettings() {
   return { settings, hasKey };
 }
 
-export async function saveLlmSettings({ provider, model, embeddingModel, apiKey }) {
+export async function saveLlmSettings({ provider, model, embeddingModel, apiKey, baseUrl }) {
   if (!PROVIDERS[provider]) throw new Error(`Unknown provider: ${provider}`);
   const p = PROVIDERS[provider];
   await kvs.set(SETTINGS_KEY, {
     provider,
     model: model || p.defaultModel,
     embeddingModel: embeddingModel || p.defaultEmbeddingModel,
+    ...(p.needsBaseUrl ? { baseUrl: baseUrl || null } : {}),
   });
   if (apiKey) await kvs.setSecret(secretKeyFor(provider), apiKey);
 }
@@ -135,7 +143,8 @@ export async function listModels(provider, apiKey = null) {
   if (!key && !p.keyless) return fallback;
   try {
     if (provider === 'ollama') {
-      const res = await localFetch(`${OLLAMA_BASE_URL}/api/tags`);
+      const settings = await kvs.get(SETTINGS_KEY);
+      const res = await fetch(`${ollamaBaseUrl(settings)}/api/tags`);
       if (!res.ok) throw new Error(`Ollama tags API: ${res.status}`);
       const data = await res.json();
       const names = (data.models ?? []).map((m) => m.name);
@@ -295,7 +304,7 @@ async function complete(cfg, system, prompt) {
     return data.content?.[0]?.text ?? '';
   }
   if (cfg.provider === 'ollama') {
-    const res = await localFetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
+    const res = await fetch(`${ollamaBaseUrl(cfg)}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -349,7 +358,7 @@ export async function embed(texts) {
     return data.data.map((d) => d.embedding);
   }
   if (cfg.provider === 'ollama') {
-    const res = await localFetch(`${OLLAMA_BASE_URL}/api/embed`, {
+    const res = await fetch(`${ollamaBaseUrl(cfg)}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: cfg.embeddingModel, input: texts.map((t) => t.slice(0, 8000)) }),

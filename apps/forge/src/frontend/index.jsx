@@ -619,7 +619,13 @@ const Overview = ({ onDrill, onSettings }) => {
           <Text>
             {`Failed at ${new Date(stats.last_scan_error.at).toLocaleString()}. Check your AI provider account (billing/quota) or update the key in Settings, then run the scan again.`}
           </Text>
-          <Button appearance="subtle" onClick={() => setDismissedError(stats.last_scan_error.at)}>
+          <Button
+            appearance="subtle"
+            onClick={() => {
+              setDismissedError(stats.last_scan_error.at);
+              call('dismissScanError', { at: stats.last_scan_error.at }).catch(() => {});
+            }}
+          >
             Dismiss
           </Button>
         </SectionMessage>
@@ -668,6 +674,7 @@ const SettingsView = ({ onBack }) => {
   const [provider, setProvider] = useState(null); // {label, value}
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [modelList, setModelList] = useState(null); // {models, live} from listModels
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
@@ -681,6 +688,7 @@ const SettingsView = ({ onBack }) => {
           const p = d.providers.find((x) => x.id === d.settings.provider);
           if (p) setProvider({ label: p.label, value: p.id });
           setModel(d.settings.model ?? '');
+          setBaseUrl(d.settings.baseUrl ?? '');
         }
       })
       .catch((e) => setError(String(e)));
@@ -722,6 +730,7 @@ const SettingsView = ({ onBack }) => {
         provider: provider.value,
         model: model || undefined,
         apiKey: apiKey || undefined,
+        baseUrl: baseUrl || undefined,
       });
       setApiKey('');
       setMessage('Settings saved. Your API key is stored encrypted and never leaves your site.');
@@ -788,12 +797,21 @@ const SettingsView = ({ onBack }) => {
           onChange={(e) => setApiKey(e.target.value)}
         />
         {selected?.keyless && (
-          <SectionMessage appearance="warning" title="Local development only">
-            <Text>
-              Ollama runs on your own machine, so this only works while the app is running
-              through `forge tunnel` on the same machine. The deployed app cannot reach it.
-            </Text>
-          </SectionMessage>
+          <>
+            <Text>Base URL (HTTPS tunnel to your local Ollama)</Text>
+            <Textfield
+              placeholder="https://<something>.trycloudflare.com"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+            <SectionMessage appearance="warning" title="Local development only">
+              <Text>
+                Forge can only make HTTPS calls, so expose your local Ollama with:
+                cloudflared tunnel --url http://localhost:11434 — then paste the https URL
+                above. Keep the tunnel running while scanning.
+              </Text>
+            </SectionMessage>
+          </>
         )}
         {selected && !selected.supportsEmbeddings && (
           <SectionMessage appearance="warning" title="No embeddings on this provider">
@@ -810,6 +828,7 @@ const SettingsView = ({ onBack }) => {
               saving ||
               !provider ||
               (!selected?.keyless && !apiKey && !data.hasKey) ||
+              (selected?.needsBaseUrl && !baseUrl) ||
               !data.isAdmin
             }
             onClick={save}

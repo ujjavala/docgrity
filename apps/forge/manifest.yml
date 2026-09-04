@@ -183,6 +183,8 @@ permissions:
         - address: generativelanguage.googleapis.com
         - address: api.openai.com
         - address: api.anthropic.com
+        # Dev-only: HTTPS tunnel to a local Ollama (Forge runtime is HTTPS-only)
+        - address: '*.trycloudflare.com'
 app:
   runtime:
     name: nodejs22.x

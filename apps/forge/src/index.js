@@ -6,6 +6,7 @@
  * (archive, page edit) run only from human-approved dashboard clicks.
  */
 import Resolver from '@forge/resolver';
+import { kvs } from '@forge/kvs';
 import { Queue } from '@forge/events';
 import { draftFix } from './agents';
 import { archivePage, getPage, isSiteAdmin, listSpaces, updatePage } from './confluence';
@@ -30,6 +31,7 @@ resolver.define('getSettings', async ({ context }) => {
       defaultModel: p.defaultModel,
       supportsEmbeddings: p.supportsEmbeddings,
       keyless: Boolean(p.keyless),
+      needsBaseUrl: Boolean(p.needsBaseUrl),
       models: p.models,
       embeddingModels: p.embeddingModels,
     })),
@@ -80,6 +82,8 @@ resolver.define('createScan', async ({ payload, context }) => {
   const ids = [];
   // Stagger checks so they don't hammer the provider's rate limit in parallel;
   // the first check embeds pages, later ones reuse the stored embeddings.
+  // Local providers (Ollama) have no rate limits — run checks back-to-back.
+  const staggerSeconds = PROVIDERS[settings.provider]?.keyless ? 5 : 60;
   let delayInSeconds = 0;
   for (const check of checks) {
     const scanId = uuid();
@@ -91,7 +95,7 @@ resolver.define('createScan', async ({ payload, context }) => {
       body: { scanId, check, postComments: post_comments, spaceId: space_id },
       delayInSeconds,
     });
-    delayInSeconds += 60;
+    delayInSeconds += staggerSeconds;
     ids.push(scanId);
   }
   await audit({
@@ -132,9 +136,11 @@ async function computeStats() {
   const lastFailed = await query(
     `SELECT completed_at, error FROM scan WHERE status = 'FAILED' ORDER BY completed_at DESC LIMIT 1`
   );
+  const dismissedAt = await kvs.get('dismissed-scan-error');
   const failedIsCurrent =
     lastFailed[0] &&
-    (!lastScan[0] || new Date(lastFailed[0].completed_at) > new Date(lastScan[0].completed_at));
+    (!lastScan[0] || new Date(lastFailed[0].completed_at) > new Date(lastScan[0].completed_at)) &&
+    dismissedAt !== String(lastFailed[0].completed_at);
   return {
     total_open: byType.reduce((sum, r) => sum + Number(r.n), 0),
     by_type: Object.fromEntries(byType.map((r) => [r.type, Number(r.n)])),
@@ -145,6 +151,12 @@ async function computeStats() {
       : null,
   };
 }
+
+resolver.define('dismissScanError', async ({ payload }) => {
+  const at = String(payload?.at ?? '');
+  if (at) await kvs.set('dismissed-scan-error', at);
+  return { ok: true };
+});
 
 resolver.define('listFindings', async ({ payload }) => {
   const { type = null, limit = 100 } = payload ?? {};
