@@ -20,6 +20,9 @@ modules:
       timeoutSeconds: 300
     - key: rovo-fn
       handler: rovo.handler
+    - key: privacy-runner-fn
+      handler: privacy.runner
+      timeoutSeconds: 900
   sql:
     - key: main
       engine: mysql
@@ -27,6 +30,9 @@ modules:
     - key: db-migrations
       function: migration-runner
       interval: hour
+    - key: privacy-sync
+      function: privacy-runner-fn
+      interval: week
   consumer:
     - key: scan-consumer
       queue: scans

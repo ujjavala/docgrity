@@ -69,7 +69,10 @@ site, content, findings, or keys.
 
 Docgrity stores no personal data outside your Atlassian site. Contributor
 names/IDs mirrored into findings are removed when findings are deleted or the
-app is uninstalled. For rights requests concerning Confluence data itself,
+app is uninstalled. Per Atlassian's Forge user privacy guidelines, a weekly
+scheduled job inside your installation refreshes stored display names and
+automatically erases all stored personal data for accounts that have been
+closed or erased. For rights requests concerning Confluence data itself,
 contact your Atlassian admin; for the AI provider, see that provider's policy.
 
 ## Changes

@@ -317,7 +317,7 @@ const FindingDetail = ({ findingId, onBack }) => {
         <Stack space="space.050">
           <Heading as="h4">Unresolved questions</Heading>
           {questions.map((q, i) => (
-            <Text key={i}>❓ {q}</Text>
+            <Text key={i}>❓ {typeof q === 'string' ? q : q.question}</Text>
           ))}
         </Stack>
       )}
