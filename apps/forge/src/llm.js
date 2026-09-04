@@ -189,7 +189,7 @@ export async function completeJson({ system, prompt, validate, maxRetries = 3 })
   const cfg = await requireConfig();
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const raw = await complete(cfg, system, prompt);
+    const raw = await withRetry(() => complete(cfg, system, prompt));
     try {
       const parsed = JSON.parse(extractJson(raw));
       const output = validate ? validate(parsed) : parsed;
@@ -272,28 +272,32 @@ export async function embed(texts) {
   if (cfg.provider === 'gemini') {
     const out = [];
     for (const text of texts) {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${cfg.embeddingModel}:embedContent`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
-          body: JSON.stringify({
-            content: { parts: [{ text: text.slice(0, 8000) }] },
-          }),
-        }
-      );
-      const data = await checkResponse(res, 'gemini');
+      const data = await withRetry(async () => {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${cfg.embeddingModel}:embedContent`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
+            body: JSON.stringify({
+              content: { parts: [{ text: text.slice(0, 8000) }] },
+            }),
+          }
+        );
+        return checkResponse(res, 'gemini');
+      });
       out.push(data.embedding.values);
     }
     return out;
   }
   if (cfg.provider === 'openai') {
-    const res = await fetch('https://api.openai.com/v1/embeddings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ model: cfg.embeddingModel, input: texts.map((t) => t.slice(0, 8000)) }),
+    const data = await withRetry(async () => {
+      const res = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({ model: cfg.embeddingModel, input: texts.map((t) => t.slice(0, 8000)) }),
+      });
+      return checkResponse(res, 'openai');
     });
-    const data = await checkResponse(res, 'openai');
     return data.data.map((d) => d.embedding);
   }
   throw new Error(
@@ -313,6 +317,19 @@ async function checkResponse(res, provider) {
     throw new Error(`${provider} API error ${res.status}: ${text.slice(0, 300)}`);
   }
   return res.json();
+}
+
+/** Retry rate-limit (429) and transient (5xx) provider errors with backoff. */
+async function withRetry(fn, retries = 4) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const retriable = /API error (429|5\d\d)/.test(String(err));
+      if (!retriable || attempt >= retries) throw err;
+      await new Promise((r) => setTimeout(r, Math.min(2000 * 2 ** attempt, 30000)));
+    }
+  }
 }
 
 export function cosineSimilarity(a, b) {

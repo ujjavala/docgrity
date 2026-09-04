@@ -77,6 +77,9 @@ resolver.define('createScan', async ({ payload, context }) => {
     throw new Error('Configure an LLM provider and API key in Settings before scanning.');
   }
   const ids = [];
+  // Stagger checks so they don't hammer the provider's rate limit in parallel;
+  // the first check embeds pages, later ones reuse the stored embeddings.
+  let delayInSeconds = 0;
   for (const check of checks) {
     const scanId = uuid();
     await execute(`INSERT INTO scan (id, status, checks) VALUES (?, 'PENDING', ?)`, [
@@ -85,7 +88,9 @@ resolver.define('createScan', async ({ payload, context }) => {
     ]);
     await scansQueue.push({
       body: { scanId, check, postComments: post_comments, spaceId: space_id },
+      delayInSeconds,
     });
+    delayInSeconds += 60;
     ids.push(scanId);
   }
   await audit({
