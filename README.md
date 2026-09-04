@@ -15,9 +15,12 @@ Two zero-infrastructure implementations:
    entirely on Forge (SQL, async events, scheduled triggers). Tenants bring their own
    LLM API key (Gemini / OpenAI / Anthropic) and get a dashboard, Confluence comments,
    and a Rovo agent. See [docs/forge-native.md](docs/forge-native.md).
-2. **VS Code extension** (planned) — same checks for repository docs, powered by the
-   user's own GitHub Copilot subscription via `vscode.lm`.
-   See [docs/vscode-extension.md](docs/vscode-extension.md).
+2. **VS Code extension** — lives in its own repo:
+   [ujjavala/docgrity-vscode](https://github.com/ujjavala/docgrity-vscode). Same checks
+   for repository **markdown docs only**, powered by the user's own GitHub Copilot
+   subscription via `vscode.lm`; notify action raises a **GitHub issue** instead of a
+   Confluence comment. Original blueprint:
+   [docs/vscode-extension.md](docs/vscode-extension.md).
 
 > The original FastAPI/PostgreSQL reference implementation is preserved in git history
 > (checkpoint commit) and was removed from the working tree after the Forge-native port.
