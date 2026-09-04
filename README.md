@@ -2,13 +2,16 @@
 
 **Find what your organisation doesn't agree on — and get the right person to fix it.**
 
+🌐 **Website:** [ujjavala.github.io/docgrity-site](https://ujjavala.github.io/docgrity-site/) · [How it works](https://ujjavala.github.io/docgrity-site/how-it-works.html) · **Install free from the website** (Confluence site admins)
+
 Docgrity is an agentic knowledge-integrity platform that checks whether an organisation's
 documentation agrees with itself: duplicate pages, contradictory claims, unanswered open
 questions — each finding backed by evidence and linked to *potential* owners.
 
 Two zero-infrastructure implementations:
 
-1. **Atlassian Forge app** (`apps/forge`) — ships to the Atlassian Marketplace. Runs
+1. **Atlassian Forge app** (`apps/forge`) — available now via the install link on the
+   [website](https://ujjavala.github.io/docgrity-site/). Runs
    entirely on Forge (SQL, async events, scheduled triggers). Tenants bring their own
    LLM API key (Gemini / OpenAI / Anthropic) and get a dashboard, Confluence comments,
    and a Rovo agent. See [docs/forge-native.md](docs/forge-native.md).
