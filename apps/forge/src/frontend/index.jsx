@@ -10,13 +10,16 @@
  */
 import React, { useEffect, useState } from 'react';
 import ForgeReconciler, {
+  Box,
   Button,
   ButtonGroup,
   DynamicTable,
   Heading,
+  Icon,
   Inline,
   Link,
   Lozenge,
+  Pressable,
   SectionMessage,
   Select,
   Spinner,
@@ -52,13 +55,53 @@ const TYPE_LABELS = {
 
 const CHECKS = ['duplicates', 'contradictions', 'open_questions'];
 
-const cardStyle = xcss({
+/* Fancy stat tiles — whole tile clickable, coloured border, big number + icon. */
+const tileBase = {
   backgroundColor: 'elevation.surface.raised',
   boxShadow: 'elevation.shadow.raised',
-  borderRadius: 'border.radius.200',
-  padding: 'space.200',
-  minWidth: '160px',
-});
+  borderStyle: 'solid',
+  borderWidth: 'border.width.outline',
+  borderRadius: 'border.radius.300',
+  padding: 'space.250',
+  minWidth: '190px',
+};
+
+const tileStyle = {
+  blue: xcss({ ...tileBase, borderColor: 'color.border.brand' }),
+  purple: xcss({ ...tileBase, borderColor: 'color.border.discovery' }),
+  red: xcss({ ...tileBase, borderColor: 'color.border.danger' }),
+  yellow: xcss({ ...tileBase, borderColor: 'color.border.warning' }),
+};
+
+const iconBadgeStyle = {
+  blue: xcss({
+    backgroundColor: 'color.background.accent.blue.subtlest',
+    borderRadius: 'border.radius.circle',
+    padding: 'space.100',
+  }),
+  purple: xcss({
+    backgroundColor: 'color.background.accent.purple.subtlest',
+    borderRadius: 'border.radius.circle',
+    padding: 'space.100',
+  }),
+  red: xcss({
+    backgroundColor: 'color.background.accent.red.subtlest',
+    borderRadius: 'border.radius.circle',
+    padding: 'space.100',
+  }),
+  yellow: xcss({
+    backgroundColor: 'color.background.accent.yellow.subtlest',
+    borderRadius: 'border.radius.circle',
+    padding: 'space.100',
+  }),
+};
+
+const STAT_TILES = {
+  TOTAL: { glyph: 'flag', accent: 'blue', iconColor: 'color.icon.brand' },
+  DUPLICATE: { glyph: 'copy', accent: 'purple', iconColor: 'color.icon.discovery' },
+  CONTRADICTION: { glyph: 'warning', accent: 'red', iconColor: 'color.icon.danger' },
+  OPEN_QUESTION: { glyph: 'question-circle', accent: 'yellow', iconColor: 'color.icon.warning' },
+};
 
 const settingsFormStyle = xcss({
   maxWidth: '480px',
@@ -506,18 +549,18 @@ const FindingsList = ({ type, onBack, onOpen }) => {
 
 /* ---------- Level 1: stats overview ---------- */
 
-const StatCard = ({ label, count, emphasis, onClick }) => (
-  <Stack xcss={cardStyle} space="space.100">
-    <Text>{label}</Text>
-    <Heading as="h1">{String(count)}</Heading>
-    <Button
-      appearance={emphasis ? 'primary' : 'default'}
-      onClick={onClick}
-      isDisabled={count === 0}
-    >
-      View
-    </Button>
-  </Stack>
+const StatCard = ({ label, count, onClick, tile }) => (
+  <Pressable xcss={tileStyle[tile.accent]} onClick={onClick} isDisabled={count === 0}>
+    <Stack space="space.150">
+      <Inline spread="space-between" alignBlock="center" space="space.300">
+        <Heading as="h1">{String(count)}</Heading>
+        <Box xcss={iconBadgeStyle[tile.accent]}>
+          <Icon glyph={tile.glyph} label="" color={tile.iconColor} size="medium" />
+        </Box>
+      </Inline>
+      <Text weight="medium">{label}</Text>
+    </Stack>
+  </Pressable>
 );
 
 const Overview = ({ onDrill, onSettings }) => {
@@ -636,7 +679,7 @@ const Overview = ({ onDrill, onSettings }) => {
         <StatCard
           label="Total open"
           count={stats.total_open}
-          emphasis
+          tile={STAT_TILES.TOTAL}
           onClick={() => onDrill(null)}
         />
         {types.map((t) => (
@@ -644,6 +687,7 @@ const Overview = ({ onDrill, onSettings }) => {
             key={t}
             label={TYPE_LABELS[t]}
             count={stats.by_type[t] ?? 0}
+            tile={STAT_TILES[t]}
             onClick={() => onDrill(t)}
           />
         ))}
@@ -679,6 +723,8 @@ const SettingsView = ({ onBack }) => {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
+  const [resetArmed, setResetArmed] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     call('getSettings')
@@ -837,6 +883,48 @@ const SettingsView = ({ onBack }) => {
           </Button>
         </Inline>
       </Stack>
+      {data.isAdmin && (
+        <Stack space="space.100" xcss={settingsFormStyle}>
+          <Heading as="h3">Danger zone</Heading>
+          <Text>
+            Reset all Docgrity data: deletes every finding, scan and ingested page copy so the
+            next scan starts from zero. Provider settings and the audit trail are kept. This
+            cannot be undone.
+          </Text>
+          <Inline space="space.100">
+            {!resetArmed ? (
+              <Button appearance="danger" onClick={() => setResetArmed(true)}>
+                Reset all data…
+              </Button>
+            ) : (
+              <>
+                <Button
+                  appearance="danger"
+                  isDisabled={resetting}
+                  onClick={async () => {
+                    setResetting(true);
+                    setError(null);
+                    try {
+                      await call('resetData');
+                      setMessage('All findings, scans and ingested data were deleted.');
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setResetting(false);
+                      setResetArmed(false);
+                    }
+                  }}
+                >
+                  {resetting ? 'Resetting…' : 'Yes, delete everything'}
+                </Button>
+                <Button appearance="subtle" onClick={() => setResetArmed(false)}>
+                  Cancel
+                </Button>
+              </>
+            )}
+          </Inline>
+        </Stack>
+      )}
     </Stack>
   );
 };

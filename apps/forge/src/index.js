@@ -158,6 +158,38 @@ resolver.define('dismissScanError', async ({ payload }) => {
   return { ok: true };
 });
 
+// Admin-only: wipe all findings, scans and ingested content so the next scan
+// starts from zero. Settings (provider/key) and the audit trail are kept.
+resolver.define('resetData', async ({ context }) => {
+  if (!(await isSiteAdmin(context?.accountId))) {
+    await audit({
+      actor: context?.accountId ?? 'unknown',
+      eventType: 'data.reset_denied',
+      policyDecision: 'DENIED',
+      detail: { reason: 'not a site admin' },
+    });
+    throw new Error('Only Confluence site admins can reset Docgrity data.');
+  }
+  // Child tables first (no FK cascade in Forge SQL).
+  for (const table of [
+    'finding_evidence',
+    'finding_person',
+    'comment_action',
+    'finding',
+    'scan',
+    'knowledge_item',
+  ]) {
+    await execute(`DELETE FROM ${table}`);
+  }
+  await kvs.delete('dismissed-scan-error');
+  await audit({
+    actor: context?.accountId ?? 'admin',
+    eventType: 'data.reset',
+    detail: { tables: ['finding', 'finding_evidence', 'finding_person', 'comment_action', 'scan', 'knowledge_item'] },
+  });
+  return { ok: true };
+});
+
 resolver.define('listFindings', async ({ payload }) => {
   const { type = null, limit = 100 } = payload ?? {};
   const lim = Math.min(Number(limit) || 100, 500);
