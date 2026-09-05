@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests & audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/forge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/forge/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: Dependency vulnerability audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Secret pattern scan (source only)
+        run: |
+          ! grep -rInE "(sk-[A-Za-z0-9]{20,}|AIza[A-Za-z0-9_-]{30,}|ATATT[A-Za-z0-9_-]{20,})" src/ \
+            && echo "No hardcoded credentials found."
+
+  codeql:
+    name: CodeQL analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - uses: github/codeql-action/analyze@v3
