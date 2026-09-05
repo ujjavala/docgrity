@@ -589,13 +589,16 @@ const Overview = ({ onDrill, onSettings }) => {
     setScanning(true);
     setScanMessage(null);
     try {
-      await call('createScan', {
+      const res = await call('createScan', {
         checks: CHECKS,
         post_comments: false,
         space_id: space?.value ?? null,
       });
+      const target = space ? space.label : 'all ingested spaces';
       setScanMessage(
-        `Scan started for ${space ? space.label : 'all ingested spaces'} — duplicates, contradictions and open questions. Refresh in a few minutes.`,
+        res?.mode === 'heuristic'
+          ? `Scan started for ${target} using built-in heuristics (no AI provider configured) — duplicates and open questions only. Contradiction detection needs an AI provider: add one in Settings. Refresh in a few minutes.`
+          : `Scan started for ${target} — duplicates, contradictions and open questions. Refresh in a few minutes.`,
       );
     } catch (err) {
       setError(String(err));
@@ -794,9 +797,11 @@ const SettingsView = ({ onBack }) => {
       </Button>
       <Heading as="h2">Settings — AI provider</Heading>
       <Text>
-        Docgrity runs entirely on your Atlassian site. Analysis uses your own AI provider
-        account: choose a provider, pick a model, and paste your API key. The key is stored as an
-        encrypted Forge secret and is only used to call the provider you choose.
+        Docgrity runs entirely on your Atlassian site. Out of the box it uses free built-in
+        heuristics (no AI, no key, no data leaves Atlassian). For contradiction detection and
+        smarter duplicate matching, choose an AI provider, pick a model, and paste your API key.
+        The key is stored as an encrypted Forge secret and is only used to call the provider you
+        choose.
       </Text>
       {message && (
         <SectionMessage appearance="success">
@@ -842,7 +847,18 @@ const SettingsView = ({ onBack }) => {
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
         />
-        {selected?.keyless && (
+        {selected?.heuristic && (
+          <SectionMessage appearance="information" title="No AI — built-in heuristics">
+            <Text>
+              Free and fully local: nothing leaves Atlassian. Detects duplicates (lexical
+              similarity) and open questions (TODO/TBD/unanswered questions).
+              Contradiction detection is NOT available in this mode — spotting “the SLA is 4
+              hours” vs “the SLA is 24 hours” needs semantic reasoning from an AI provider.
+              Paraphrased (reworded) duplicates are also not detected without AI.
+            </Text>
+          </SectionMessage>
+        )}
+        {selected?.needsBaseUrl && (
           <>
             <Text>Base URL (HTTPS tunnel to your local Ollama)</Text>
             <Textfield
@@ -859,7 +875,7 @@ const SettingsView = ({ onBack }) => {
             </SectionMessage>
           </>
         )}
-        {selected && !selected.supportsEmbeddings && (
+        {selected && !selected.supportsEmbeddings && !selected.heuristic && (
           <SectionMessage appearance="warning" title="No embeddings on this provider">
             <Text>
               This provider has no embeddings API, so duplicate/contradiction candidate selection

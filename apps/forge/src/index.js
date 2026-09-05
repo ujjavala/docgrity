@@ -11,7 +11,7 @@ import { Queue } from '@forge/events';
 import { draftFix } from './agents';
 import { archivePage, getPage, isSiteAdmin, listSpaces, updatePage } from './confluence';
 import { audit, execute, query, uuid } from './db';
-import { getLlmSettings, listModels, PROVIDERS, saveLlmSettings } from './llm';
+import { getLlmSettings, isHeuristicMode, listModels, PROVIDERS, saveLlmSettings } from './llm';
 
 const resolver = new Resolver();
 const scansQueue = new Queue({ key: 'scans' });
@@ -31,6 +31,7 @@ resolver.define('getSettings', async ({ context }) => {
       defaultModel: p.defaultModel,
       supportsEmbeddings: p.supportsEmbeddings,
       keyless: Boolean(p.keyless),
+      heuristic: Boolean(p.heuristic),
       needsBaseUrl: Boolean(p.needsBaseUrl),
       models: p.models,
       embeddingModels: p.embeddingModels,
@@ -75,17 +76,20 @@ resolver.define('getSpaces', async () => listSpaces());
 
 resolver.define('createScan', async ({ payload, context }) => {
   const { checks = [], post_comments = false, space_id = null } = payload;
-  const { settings, hasKey } = await getLlmSettings();
-  if (!settings || !hasKey) {
-    throw new Error('Configure an LLM provider and API key in Settings before scanning.');
-  }
+  const { settings } = await getLlmSettings();
+  // No provider/key configured (or heuristic explicitly chosen): scans run in
+  // built-in heuristic mode — free, zero egress, but no contradiction check
+  // (that needs semantic reasoning from an AI provider).
+  const heuristic = await isHeuristicMode();
+  const skipped = heuristic ? checks.filter((c) => c === 'contradictions') : [];
+  const runnable = checks.filter((c) => !skipped.includes(c));
   const ids = [];
   // Stagger checks so they don't hammer the provider's rate limit in parallel;
   // the first check embeds pages, later ones reuse the stored embeddings.
-  // Local providers (Ollama) have no rate limits — run checks back-to-back.
-  const staggerSeconds = PROVIDERS[settings.provider]?.keyless ? 5 : 60;
+  // Local/heuristic providers have no rate limits — run checks back-to-back.
+  const staggerSeconds = heuristic || PROVIDERS[settings?.provider]?.keyless ? 5 : 60;
   let delayInSeconds = 0;
-  for (const check of checks) {
+  for (const check of runnable) {
     const scanId = uuid();
     await execute(`INSERT INTO scan (id, status, checks) VALUES (?, 'PENDING', ?)`, [
       scanId,
@@ -101,9 +105,9 @@ resolver.define('createScan', async ({ payload, context }) => {
   await audit({
     actor: context?.accountId ?? 'user',
     eventType: 'scan.requested',
-    detail: { checks, post_comments, space_id },
+    detail: { checks, post_comments, space_id, mode: heuristic ? 'heuristic' : 'llm', skipped },
   });
-  return { scan_ids: ids };
+  return { scan_ids: ids, mode: heuristic ? 'heuristic' : 'llm', skipped_checks: skipped };
 });
 
 /* ---------- Findings ---------- */

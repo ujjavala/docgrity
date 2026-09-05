@@ -29,6 +29,19 @@ async function getProviderKey(provider) {
 // until an API key is available — listModels() fetches the live list from
 // each provider's /models endpoint.
 export const PROVIDERS = {
+  // No-AI mode: built-in deterministic algorithms (src/heuristics.js).
+  // Zero egress, zero cost, no key. Duplicates + open questions only —
+  // contradiction detection requires semantic reasoning (an AI provider).
+  heuristic: {
+    label: 'No AI — built-in heuristics (free, no data leaves Atlassian)',
+    defaultModel: 'heuristic-v1',
+    defaultEmbeddingModel: null,
+    supportsEmbeddings: false,
+    keyless: true,
+    heuristic: true,
+    models: ['heuristic-v1'],
+    embeddingModels: [],
+  },
   gemini: {
     label: 'Google Gemini',
     defaultModel: 'gemini-2.0-flash',
@@ -107,6 +120,13 @@ export async function getLlmSettings() {
   return { settings, hasKey };
 }
 
+/** True when scans must use built-in heuristics: the admin picked heuristic
+ * mode explicitly, OR nothing is configured yet (instant value on install). */
+export async function isHeuristicMode() {
+  const { settings, hasKey } = await getLlmSettings();
+  return !settings || !hasKey || Boolean(PROVIDERS[settings.provider]?.heuristic);
+}
+
 export async function saveLlmSettings({ provider, model, embeddingModel, apiKey, baseUrl }) {
   if (!PROVIDERS[provider]) throw new Error(`Unknown provider: ${provider}`);
   const p = PROVIDERS[provider];
@@ -121,6 +141,11 @@ export async function saveLlmSettings({ provider, model, embeddingModel, apiKey,
 
 async function requireConfig() {
   const settings = await kvs.get(SETTINGS_KEY);
+  if (settings && PROVIDERS[settings.provider]?.heuristic) {
+    throw new Error(
+      'Heuristic mode has no LLM — this check requires an AI provider (Settings).'
+    );
+  }
   const keyless = settings && PROVIDERS[settings.provider]?.keyless;
   const apiKey = settings && !keyless ? await getProviderKey(settings.provider) : null;
   if (!settings || (!keyless && !apiKey)) {

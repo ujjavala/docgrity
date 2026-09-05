@@ -22,7 +22,8 @@ import {
   storageToText,
 } from './confluence';
 import { audit, execute, query, uuid } from './db';
-import { cosineSimilarity, embed, supportsEmbeddings } from './llm';
+import { heuristicAssessDuplicate, heuristicAssessOpenQuestions } from './heuristics';
+import { cosineSimilarity, embed, isHeuristicMode, supportsEmbeddings } from './llm';
 
 const DEFAULT_THRESHOLDS = {
   candidateSimilarity: 0.8,
@@ -30,6 +31,9 @@ const DEFAULT_THRESHOLDS = {
   contradictionConfidence: 0.75,
   openQuestionConfidence: 0.7,
   maxPairsPerScan: 15,
+  // Heuristic comparisons are pure local CPU (no LLM calls), so far more
+  // pairs can be assessed per scan.
+  maxPairsHeuristic: 400,
 };
 
 async function getThresholds() {
@@ -39,21 +43,35 @@ async function getThresholds() {
 export const handler = async (event) => {
   const { scanId, check, postComments = false, spaceId = null } = event.body;
   await execute(`UPDATE scan SET status = 'RUNNING', started_at = NOW() WHERE id = ?`, [scanId]);
-  await audit({ actor: 'system', eventType: 'scan.started', resourceType: 'scan', resourceId: scanId, detail: { check, postComments } });
+  const heuristic = await isHeuristicMode();
+  await audit({ actor: 'system', eventType: 'scan.started', resourceType: 'scan', resourceId: scanId, detail: { check, postComments, mode: heuristic ? 'heuristic' : 'llm' } });
 
-  const stats = { pages: 0, assessed: 0, findings: 0 };
+  const stats = { pages: 0, assessed: 0, findings: 0, mode: heuristic ? 'heuristic' : 'llm' };
   try {
+    // Contradiction detection needs semantic reasoning — not possible with
+    // built-in heuristics. Complete the scan as skipped so the user sees why.
+    if (heuristic && check === 'contradictions') {
+      stats.skipped = 'Contradiction detection requires an AI provider (Settings).';
+      await execute(
+        `UPDATE scan SET status = 'COMPLETED', completed_at = NOW(), stats = ? WHERE id = ?`,
+        [JSON.stringify(stats), scanId]
+      );
+      await audit({ actor: 'system', eventType: 'scan.skipped', resourceType: 'scan', resourceId: scanId, detail: stats });
+      return;
+    }
+
     const pages = await ingestPages(spaceId);
     stats.pages = pages.length;
     const thresholds = await getThresholds();
 
     if (check === 'duplicates') {
-      await scanPairs(pages, thresholds, scanId, postComments, stats, {
+      await scanPairs(pages, thresholds, scanId, heuristic ? false : postComments, stats, {
         type: 'DUPLICATE',
-        assess: assessDuplicate,
+        assess: heuristic ? async (a, b) => heuristicAssessDuplicate(a, b) : assessDuplicate,
         accept: (o) => o.is_duplicate && o.evidence.length && o.confidence >= thresholds.duplicateConfidence,
         severity: () => 'MEDIUM',
         action: (o) => o.recommended_action,
+        maxPairs: heuristic ? thresholds.maxPairsHeuristic : thresholds.maxPairsPerScan,
       });
     } else if (check === 'contradictions') {
       await scanPairs(pages, thresholds, scanId, postComments, stats, {
@@ -64,7 +82,9 @@ export const handler = async (event) => {
         action: () => 'REVIEW',
       });
     } else if (check === 'open_questions') {
-      await scanOpenQuestions(pages, thresholds, scanId, postComments, stats);
+      await scanOpenQuestions(pages, thresholds, scanId, heuristic ? false : postComments, stats, {
+        assess: heuristic ? async (page) => heuristicAssessOpenQuestions(page) : assessOpenQuestions,
+      });
     }
 
     await execute(
@@ -111,11 +131,19 @@ async function ingestPages(spaceId) {
       );
     } else {
       id = uuid();
+      // Two staggered scan invocations can ingest concurrently (fast heuristic
+      // mode especially) — make the insert race-safe: if another invocation
+      // inserted this page first, fall back to updating the existing row.
       await execute(
         `INSERT INTO knowledge_item (id, external_id, title, url, space_id, version, content, last_author_account_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE title = VALUES(title), url = VALUES(url), version = VALUES(version),
+           content = VALUES(content), last_author_account_id = VALUES(last_author_account_id)`,
         [id, String(p.id), p.title, url, p.spaceId ?? null, p.version?.number ?? null, text.slice(0, 100000), p.authorId ?? null]
       );
+      // On a duplicate-key upsert our new id was NOT used — read back the real one.
+      const row = await query(`SELECT id FROM knowledge_item WHERE external_id = ?`, [String(p.id)]);
+      id = row[0].id;
     }
     pages.push({ id, externalId: String(p.id), title: p.title, url, text, embedding });
   }
@@ -172,7 +200,8 @@ async function alreadyReported(type, aId, bId) {
 }
 
 async function scanPairs(pages, thresholds, scanId, postComments, stats, cfg) {
-  const pairs = candidatePairs(pages, thresholds.candidateSimilarity, thresholds.maxPairsPerScan);
+  const maxPairs = cfg.maxPairs ?? thresholds.maxPairsPerScan;
+  const pairs = candidatePairs(pages, thresholds.candidateSimilarity, maxPairs);
   for (const { a, b } of pairs) {
     if (await alreadyReported(cfg.type, a.id, b.id)) continue;
     const { output, model, promptVersion } = await cfg.assess(a, b);
@@ -217,7 +246,8 @@ async function scanPairs(pages, thresholds, scanId, postComments, stats, cfg) {
 
 /* ---------- Open questions ---------- */
 
-async function scanOpenQuestions(pages, thresholds, scanId, postComments, stats) {
+async function scanOpenQuestions(pages, thresholds, scanId, postComments, stats, opts = {}) {
+  const assess = opts.assess ?? assessOpenQuestions;
   for (const page of pages) {
     const dup = await query(
       `SELECT f.id FROM finding f JOIN finding_evidence e ON e.finding_id = f.id
@@ -225,7 +255,7 @@ async function scanOpenQuestions(pages, thresholds, scanId, postComments, stats)
       [page.id]
     );
     if (dup.length) continue;
-    const { output, model, promptVersion } = await assessOpenQuestions(page);
+    const { output, model, promptVersion } = await assess(page);
     stats.assessed++;
     const kept = output.questions.filter((q) => q.confidence >= thresholds.openQuestionConfidence);
     if (!kept.length) continue;
