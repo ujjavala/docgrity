@@ -73,8 +73,8 @@ MVP priority: **high-confidence detection + explainability + ownership + comment
 
 1. **MVP 1 (current)** — Confluence only: connect, select spaces, ingest, embeddings,
    duplicate detection + LLM verification, ownership inference, findings, Confluence comments,
-   verification. Distributed as a **Forge app** targeting the Atlassian Marketplace, with heavy
-   analysis in the external Docgrity backend (Forge Remote).
+   verification. Distributed as a **Forge app** targeting the Atlassian Marketplace, running
+   entirely on Forge (no external backend) — see [forge-native.md](forge-native.md).
 2. **MVP 2** — contradictions, claims, open questions, recommended actions, dashboard.
 3. **MVP 3** — Slack ingestion, decision detection, cross-source comparison, notifications.
 4. **MVP 4** — GitHub: repo indexing, ADR analysis, code/doc drift, CODEOWNERS.

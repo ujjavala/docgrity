@@ -43,7 +43,7 @@ new version before it ships and compares against the previous baseline.
 
 ## Harness
 
-`evaluations/` contains a pytest-based harness:
+Planned harness (Node test runner, alongside the unit tests in `apps/forge/test/`):
 
 - loads a dataset,
 - runs the target agent with a pinned model + prompt version,

@@ -60,3 +60,7 @@ apps/forge/          Forge app: manifest, resolvers, agents, consumers, UI
   src/frontend/      UI Kit dashboard + settings
 docs/                architecture and implementation documents
 ```
+
+## License
+
+[Apache-2.0](LICENSE).

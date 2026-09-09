@@ -92,13 +92,13 @@ Slack discussion          0.40
 
 ## Multi-tenancy
 
-Every persisted object carries `tenant_id`. Never rely solely on application-level filtering;
-use database-level safeguards where practical. Embeddings, findings, tasks, and people are all
-tenant-scoped.
+The Forge installation is the tenant boundary: each installation gets its own isolated Forge
+SQL database and KVS, so persisted objects carry no `tenant_id`. Embeddings, findings, tasks,
+and people are all scoped to the installation by the platform.
 
 ## Relationships / graph
 
-Initial graph lives in PostgreSQL relations (`person → owns → document → mentions → entity →
+Initial graph lives in Forge SQL relations (`person → owns → document → mentions → entity →
 has_claim → claim → conflicts_with → claim`). A dedicated graph database is introduced only if
 scale/use cases justify it. Dependency edges (documents ↔ entities) drive targeted re-analysis
 when a mentioned entity's context changes.
